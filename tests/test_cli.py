@@ -1,11 +1,13 @@
-"""Tests for CLI argument parsing."""
+"""Tests for CLI argument parsing and output writing."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from jobfit.errors import EXIT_API, EXIT_USAGE
-from jobfit.main import main
+from jobfit.errors import EXIT_API, EXIT_GENERAL, EXIT_USAGE
+from jobfit.main import main, write_output
 
 
 @pytest.fixture(autouse=True)
@@ -170,3 +172,72 @@ class TestApiKeyValidation:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         # Should not raise on API key validation
         main(self._valid_args)
+
+
+class TestWriteOutput:
+    """Tests for the write_output function."""
+
+    _sample_report = "# JobFit Analysis Report\n\n## Overall Match Score: 7/10\n"
+
+    def test_no_output_path_writes_to_stdout(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_output(self._sample_report, None)
+        captured = capsys.readouterr()
+        assert captured.out == self._sample_report
+
+    def test_output_path_creates_file(self, tmp_path: Path) -> None:
+        output_file = tmp_path / "report.md"
+        write_output(self._sample_report, str(output_file))
+        assert output_file.exists()
+        assert output_file.read_text(encoding="utf-8") == self._sample_report
+
+    def test_output_file_is_utf8(self, tmp_path: Path) -> None:
+        report_with_unicode = "# Report\n\n✅ Match\n❌ Miss\n"
+        output_file = tmp_path / "report.md"
+        write_output(report_with_unicode, str(output_file))
+        content = output_file.read_bytes()
+        assert content == report_with_unicode.encode("utf-8")
+
+    def test_existing_file_is_overwritten(self, tmp_path: Path) -> None:
+        output_file = tmp_path / "report.md"
+        output_file.write_text("old content", encoding="utf-8")
+        write_output(self._sample_report, str(output_file))
+        assert output_file.read_text(encoding="utf-8") == self._sample_report
+
+    def test_permission_denied_exits_1(self, tmp_path: Path) -> None:
+        # Create a read-only directory
+        readonly_dir = tmp_path / "readonly"
+        readonly_dir.mkdir()
+        readonly_dir.chmod(0o444)
+        output_file = readonly_dir / "report.md"
+        with pytest.raises(SystemExit) as exc_info:
+            write_output(self._sample_report, str(output_file))
+        assert exc_info.value.code == EXIT_GENERAL
+        # Restore permissions for cleanup
+        readonly_dir.chmod(0o755)
+
+    def test_nonexistent_parent_dir_exits_1(self) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            write_output(self._sample_report, "/nonexistent/dir/report.md")
+        assert exc_info.value.code == EXIT_GENERAL
+
+    def test_permission_error_message_on_stderr(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        output_file = tmp_path / "nonexistent_dir" / "report.md"
+        with pytest.raises(SystemExit):
+            write_output(self._sample_report, str(output_file))
+        captured = capsys.readouterr()
+        assert "error:" in captured.err
+
+    def test_progress_message_on_success(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from jobfit.progress import configure
+
+        configure(quiet=False)
+        output_file = tmp_path / "report.md"
+        write_output(self._sample_report, str(output_file))
+        captured = capsys.readouterr()
+        assert str(output_file) in captured.err

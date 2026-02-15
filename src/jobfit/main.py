@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from jobfit import __version__
-from jobfit.errors import EXIT_API, EXIT_USAGE, format_error, print_error
+from jobfit.errors import EXIT_API, EXIT_GENERAL, EXIT_USAGE, format_error, print_error
 from jobfit.progress import configure as configure_progress
+from jobfit.progress import log_progress
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,6 +94,33 @@ def main(argv: list[str] | None = None) -> None:
             hint="Set it with: export ANTHROPIC_API_KEY='your-api-key'",
             exit_code=EXIT_API,
         )
+
+    # TODO: Pipeline steps (fetch, parse, analyze, format) will be wired here.
+    # Once the report string is produced, pass it to write_output().
+    _ = args.output  # Will be used by write_output() once pipeline is connected
+
+
+def write_output(report: str, output_path: str | None) -> None:
+    """Write the report to a file or stdout.
+
+    Args:
+        report: The formatted Markdown report string.
+        output_path: File path to write to, or None for stdout.
+    """
+    if output_path is None:
+        sys.stdout.write(report)
+        return
+
+    path = Path(output_path)
+    try:
+        path.write_text(report, encoding="utf-8")
+    except OSError as exc:
+        print_error(
+            f"Cannot write to '{output_path}'",
+            detail=str(exc),
+            exit_code=EXIT_GENERAL,
+        )
+    log_progress(f"Report saved to {output_path}")
 
 
 if __name__ == "__main__":
