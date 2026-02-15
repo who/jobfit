@@ -1,0 +1,37 @@
+[project]
+name = "jobfit"
+version = "0.1.0"
+description = "A tool for checking job-resume fit"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic",
+    "playwright",
+    "pymupdf",
+    "python-docx",
+    "rich",
+]
+
+[project.scripts]
+jobfit = "jobfit.main:main"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jobfit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
