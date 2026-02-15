@@ -8,6 +8,7 @@ import sys
 
 from jobfit import __version__
 from jobfit.errors import EXIT_API, EXIT_USAGE, format_error, print_error
+from jobfit.progress import configure as configure_progress
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,7 +79,10 @@ def main(argv: list[str] | None = None) -> None:
 
     parser.error = error_handler  # type: ignore[assignment]
 
-    parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    # Configure progress output based on --quiet flag
+    configure_progress(quiet=args.quiet)
 
     # Validate API key before any network calls
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
