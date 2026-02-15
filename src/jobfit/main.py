@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -10,9 +11,21 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from jobfit import __version__
-from jobfit.errors import EXIT_API, EXIT_GENERAL, EXIT_USAGE, format_error, print_error
+from jobfit.analyze import analyze_fit
+from jobfit.errors import (
+    EXIT_API,
+    EXIT_GENERAL,
+    EXIT_INPUT,
+    EXIT_USAGE,
+    format_error,
+    print_error,
+)
+from jobfit.extract_job import extract_job_text
+from jobfit.fetch import fetch_page
+from jobfit.parse_resume import parse_resume
 from jobfit.progress import configure as configure_progress
 from jobfit.progress import log_progress
+from jobfit.report import format_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,9 +112,53 @@ def main(argv: list[str] | None = None) -> None:
             exit_code=EXIT_API,
         )
 
-    # TODO: Pipeline steps (fetch, parse, analyze, format) will be wired here.
-    # Once the report string is produced, pass it to write_output().
-    _ = args.output  # Will be used by write_output() once pipeline is connected
+    # Validate resume file exists before starting pipeline
+    resume_path = Path(args.resume)
+    if not resume_path.exists():
+        print_error(
+            f"resume file not found: {args.resume}",
+            hint="Check that the file path is correct.",
+            exit_code=EXIT_INPUT,
+        )
+
+    # Parse resume (synchronous)
+    log_progress(f"Reading resume from {args.resume}...")
+    resume = parse_resume(resume_path)
+    log_progress(f"Parsed resume ({resume.word_count} words, {resume.format} format)")
+
+    # Run async pipeline (fetch, analyze)
+    report = asyncio.run(_async_pipeline(args.url, resume.text))
+
+    # Write output
+    write_output(report, args.output)
+
+
+async def _async_pipeline(url: str, resume_text: str) -> str:
+    """Run the async portion of the pipeline: fetch, extract, analyze, format.
+
+    Args:
+        url: Job posting URL to fetch.
+        resume_text: Parsed resume text.
+
+    Returns:
+        Formatted markdown report string.
+    """
+    # Fetch job posting
+    log_progress(f"Fetching job posting from {url}...")
+    html = await fetch_page(url)
+
+    # Extract job text from HTML
+    job_text = extract_job_text(html)
+    word_count = len(job_text.split())
+    log_progress(f"Extracted job posting ({word_count} words)")
+
+    # Analyze fit with Claude
+    log_progress("Sending to Claude for analysis...")
+    analysis = await analyze_fit(job_text, resume_text)
+    log_progress("Analysis complete. Generating report...")
+
+    # Format report
+    return format_report(analysis)
 
 
 def write_output(report: str, output_path: str | None) -> None:
