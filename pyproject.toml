@@ -9,6 +9,7 @@ dependencies = [
     "playwright",
     "pymupdf",
     "python-docx",
+    "python-dotenv>=1.2.1",
     "rich",
 ]
 
