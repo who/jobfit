@@ -139,6 +139,7 @@ class TestApiKeyValidation:
 
     def test_missing_key_exits_5(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("jobfit.main.load_dotenv", lambda: None)
         with pytest.raises(SystemExit) as exc_info:
             main(self._valid_args)
         assert exc_info.value.code == EXIT_API
@@ -161,6 +162,7 @@ class TestApiKeyValidation:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("jobfit.main.load_dotenv", lambda: None)
         with pytest.raises(SystemExit):
             main(self._valid_args)
         captured = capsys.readouterr()

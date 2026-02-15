@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from jobfit import __version__
 from jobfit.errors import EXIT_API, EXIT_GENERAL, EXIT_USAGE, format_error, print_error
 from jobfit.progress import configure as configure_progress
@@ -71,8 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     """Run the jobfit application."""
-    from dotenv import load_dotenv
-
     load_dotenv()
 
     parser = build_parser()
