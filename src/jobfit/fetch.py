@@ -2,12 +2,37 @@
 
 from __future__ import annotations
 
+import re
+from urllib.parse import urlparse
+
 from playwright.async_api import Error as PlaywrightError
 
 from jobfit.browser import create_browser_context
 from jobfit.errors import EXIT_NETWORK, print_error
 
 _PAGE_LOAD_TIMEOUT_MS = 30_000
+
+_LOGIN_PATH_PATTERN = re.compile(
+    r"/(login|signin|sign-in|sign_in|auth|sso|cas|oauth|saml)",
+    re.IGNORECASE,
+)
+
+_CAPTCHA_PATTERN = re.compile(
+    r"(captcha|recaptcha|hcaptcha|g-recaptcha|h-captcha|cf-turnstile"
+    r"|challenge-platform|challenge-form)",
+    re.IGNORECASE,
+)
+
+
+def _is_login_redirect(original_url: str, final_url: str) -> bool:
+    """Check if the page redirected to a login/auth page."""
+    original_parsed = urlparse(original_url)
+    final_parsed = urlparse(final_url)
+    same_host = original_parsed.netloc == final_parsed.netloc
+    same_path = original_parsed.path == final_parsed.path
+    if same_host and same_path:
+        return False
+    return bool(_LOGIN_PATH_PATTERN.search(final_parsed.path))
 
 
 async def fetch_page(url: str) -> str:
@@ -28,6 +53,8 @@ async def fetch_page(url: str) -> str:
             - Connection timeouts
             - HTTP 4xx/5xx responses
             - SSL errors
+            - Login wall detection
+            - CAPTCHA detection
     """
     try:
         async with create_browser_context() as context:
@@ -48,7 +75,23 @@ async def fetch_page(url: str) -> str:
                 raise AssertionError("unreachable")
 
             status = response.status
-            if status >= 400:
+            if status == 403:
+                print_error(
+                    f"HTTP 403 from {url}",
+                    detail="The server returned 403 Forbidden.",
+                    hint="The site may be blocking automated access. "
+                    "Try opening the URL in a browser to verify it works.",
+                    exit_code=EXIT_NETWORK,
+                )
+            elif status == 429:
+                print_error(
+                    f"HTTP 429 from {url}",
+                    detail="The server returned 429 Too Many Requests.",
+                    hint="You are being rate-limited. Wait a few minutes "
+                    "and try again.",
+                    exit_code=EXIT_NETWORK,
+                )
+            elif status >= 400:
                 print_error(
                     f"HTTP {status} from {url}",
                     detail=f"The server returned status code {status}.",
@@ -56,7 +99,31 @@ async def fetch_page(url: str) -> str:
                     exit_code=EXIT_NETWORK,
                 )
 
-            return await page.content()
+            # Detect login wall via redirect
+            final_url = response.url
+            if _is_login_redirect(url, final_url):
+                print_error(
+                    f"login wall detected for {url}",
+                    detail=f"The page redirected to a login page: {final_url}",
+                    hint="This job posting requires authentication. "
+                    "Try copying the posting text manually instead.",
+                    exit_code=EXIT_NETWORK,
+                )
+
+            html = await page.content()
+
+            # Detect CAPTCHA in page content
+            if _CAPTCHA_PATTERN.search(html):
+                print_error(
+                    f"CAPTCHA detected on {url}",
+                    detail="The page contains a CAPTCHA challenge.",
+                    hint="The site is requiring human verification. "
+                    "Try opening the URL in a browser and copying the "
+                    "posting text manually.",
+                    exit_code=EXIT_NETWORK,
+                )
+
+            return html
 
     except PlaywrightError as exc:
         message = str(exc).lower()
