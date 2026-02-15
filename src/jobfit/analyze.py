@@ -146,16 +146,23 @@ Provide your analysis in the following format:
     # Extract the text from the response
     raw_report = response.content[0].text
 
-    # Extract the score from the report using regex
-    score_match = re.search(
-        r"##\s*Overall Match Score:\s*(\d+)/10",
-        raw_report,
-        re.IGNORECASE,
-    )
-    if score_match:
-        score = int(score_match.group(1))
-    else:
-        # If we can't parse the score, default to 0 and warn
+    # Extract the score from the report using regex, trying multiple patterns
+    score: int | None = None
+    score_patterns = [
+        # Strict: markdown heading format
+        r"##\s*Overall Match Score:\s*(\d+)\s*/\s*10",
+        # Medium: with optional bold/markdown markers
+        r"\*{0,2}Overall Match Score\*{0,2}\s*:?\s*(\d+)\s*/\s*10",
+        # Loose: any "X/10" near "score" context
+        r"(?:match\s+)?score\s*:?\s*(\d+)\s*/\s*10",
+    ]
+    for pattern in score_patterns:
+        score_match = re.search(pattern, raw_report, re.IGNORECASE)
+        if score_match:
+            score = int(score_match.group(1))
+            break
+
+    if score is None:
         print_error(
             "failed to parse match score from Claude response",
             detail=(

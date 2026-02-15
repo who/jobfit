@@ -191,6 +191,11 @@ class TestAnalyzeFitSuccess:
             ("## Overall Match Score: 10/10", 10),
             ("##Overall Match Score:9/10", 9),  # No spaces
             ("## overall match score: 7/10", 7),  # Lowercase
+            ("**Overall Match Score: 8/10**", 8),  # Bold markers
+            ("**Overall Match Score**: 6/10", 6),  # Bold on label only
+            ("Overall Match Score: 4/10", 4),  # No heading marker
+            ("Match Score: 3/10", 3),  # Shorter label
+            ("Score: 9 / 10", 9),  # Spaces around slash
         ]
 
         for report_text, expected_score in test_cases:
