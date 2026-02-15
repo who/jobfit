@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from jobfit.errors import EXIT_USAGE
+from jobfit.errors import EXIT_API, EXIT_USAGE
 from jobfit.main import main
+
+
+@pytest.fixture(autouse=True)
+def _set_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set a dummy API key so arg-parsing tests don't fail on key validation."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
 
 
 class TestRequiredArgs:
@@ -122,3 +128,45 @@ class TestInvalidFlags:
         with pytest.raises(SystemExit) as exc_info:
             main(["--nonexistent"])
         assert exc_info.value.code == EXIT_USAGE
+
+
+class TestApiKeyValidation:
+    """ANTHROPIC_API_KEY validation at startup."""
+
+    _valid_args = ["--url", "https://example.com/job", "--resume", "resume.pdf"]
+
+    def test_missing_key_exits_5(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(SystemExit) as exc_info:
+            main(self._valid_args)
+        assert exc_info.value.code == EXIT_API
+
+    def test_empty_key_exits_5(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+        with pytest.raises(SystemExit) as exc_info:
+            main(self._valid_args)
+        assert exc_info.value.code == EXIT_API
+
+    def test_whitespace_key_exits_5(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")
+        with pytest.raises(SystemExit) as exc_info:
+            main(self._valid_args)
+        assert exc_info.value.code == EXIT_API
+
+    def test_error_message_on_stderr(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(SystemExit):
+            main(self._valid_args)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "ANTHROPIC_API_KEY" in captured.err
+        assert "error:" in captured.err
+
+    def test_valid_key_no_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        # Should not raise on API key validation
+        main(self._valid_args)

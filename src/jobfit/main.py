@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from jobfit import __version__
-from jobfit.errors import EXIT_USAGE, format_error
+from jobfit.errors import EXIT_API, EXIT_USAGE, format_error, print_error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +79,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.error = error_handler  # type: ignore[assignment]
 
     parser.parse_args(argv)
+
+    # Validate API key before any network calls
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key.strip():
+        print_error(
+            "ANTHROPIC_API_KEY environment variable not set",
+            hint="Set it with: export ANTHROPIC_API_KEY='your-api-key'",
+            exit_code=EXIT_API,
+        )
 
 
 if __name__ == "__main__":
