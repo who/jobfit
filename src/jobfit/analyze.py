@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -26,6 +27,9 @@ class AgentResult(BaseModel):
     agent_name: str
     raw_analysis: str
     score: int
+    verdict: str | None = None
+    strengths: list[str] = []
+    concerns: list[str] = []
 
 
 class AnalysisResult(BaseModel):
@@ -119,13 +123,18 @@ referencing specific evidence from the resume]
 ## Verdict
 [One-paragraph final assessment]
 
-Finally, provide your structured score in a JSON code block:
+Finally, provide your structured payload in a JSON code block:
 
 ```json
-{{"score": X}}
+{{
+  "score": X,
+  "verdict": "your one-paragraph verdict",
+  "strengths": ["strength1", "strength2"],
+  "concerns": ["concern1", "concern2"]
+}}
 ```
 
-Where X is your score from 1-5 (1=poor fit, 5=excellent fit)."""
+Where score is 1-5 (1=poor fit, 5=excellent fit). This block is machine-parsed."""
 
 
 async def _run_agent(
@@ -212,39 +221,60 @@ async def _run_agent(
             response.usage.output_tokens,
         )
 
-    # Parse score from response — prefer JSON block, fall back to regex
+    # Parse structured payload from response — prefer JSON block, fall back to regex
     score = 3  # default if parsing fails
+    verdict: str | None = None
+    strengths: list[str] = []
+    concerns: list[str] = []
     parsed = False
 
-    # Strategy 1: JSON code block  ```json{"score": X}```
-    json_block_match = re.search(
-        r"```json\s*\{[^}]*\"score\"\s*:\s*(\d+)[^}]*\}\s*```",
+    # Strategy 1: fenced JSON code block — extract last ```json ... ``` and parse
+    json_blocks = re.findall(
+        r"```json\s*(\{.*?\})\s*```",
         raw_analysis,
-        re.IGNORECASE,
+        re.DOTALL | re.IGNORECASE,
     )
-    if json_block_match:
-        val = int(json_block_match.group(1))
-        if 1 <= val <= 5:
-            score = val
-            parsed = True
-            logger.debug("Agent %s: parsed score=%d from JSON block", agent_name, score)
+    if json_blocks:
+        try:
+            payload = json.loads(json_blocks[-1])
+            val = int(payload["score"])
+            if 1 <= val <= 5:
+                score = val
+                verdict = payload.get("verdict")
+                strengths = payload.get("strengths", [])
+                concerns = payload.get("concerns", [])
+                parsed = True
+                logger.debug(
+                    "Agent %s: parsed score=%d from JSON block", agent_name, score
+                )
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            logger.debug("Agent %s: JSON block found but failed to parse", agent_name)
 
     # Strategy 2: bare JSON object {"score": X} without code fences
     if not parsed:
         bare_json_match = re.search(
-            r"\{[^}]*\"score\"\s*:\s*(\d+)[^}]*\}",
+            r"(\{[^}]*\"score\"\s*:\s*\d+[^}]*\})",
             raw_analysis,
             re.IGNORECASE,
         )
         if bare_json_match:
-            val = int(bare_json_match.group(1))
-            if 1 <= val <= 5:
-                score = val
-                parsed = True
+            try:
+                payload = json.loads(bare_json_match.group(1))
+                val = int(payload["score"])
+                if 1 <= val <= 5:
+                    score = val
+                    verdict = payload.get("verdict")
+                    strengths = payload.get("strengths", [])
+                    concerns = payload.get("concerns", [])
+                    parsed = True
+                    logger.debug(
+                        "Agent %s: parsed score=%d from bare JSON",
+                        agent_name,
+                        score,
+                    )
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError):
                 logger.debug(
-                    "Agent %s: parsed score=%d from bare JSON",
-                    agent_name,
-                    score,
+                    "Agent %s: bare JSON found but failed to parse", agent_name
                 )
 
     # Strategy 3: legacy regex fallback (## Score: X/5 variants)
@@ -276,7 +306,14 @@ async def _run_agent(
             score,
         )
 
-    return AgentResult(agent_name=agent_name, raw_analysis=raw_analysis, score=score)
+    return AgentResult(
+        agent_name=agent_name,
+        raw_analysis=raw_analysis,
+        score=score,
+        verdict=verdict,
+        strengths=strengths,
+        concerns=concerns,
+    )
 
 
 def _aggregate_report(agent_results: list[AgentResult], model: str) -> AnalysisResult:

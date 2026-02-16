@@ -48,7 +48,12 @@ Strong technical background with relevant experience.
 A strong candidate overall.
 
 ```json
-{{"score": {score}}}
+{{
+  "score": {score},
+  "verdict": "A strong candidate overall.",
+  "strengths": ["Excellent Python skills", "Leadership experience"],
+  "concerns": ["Limited cloud experience"]
+}}
 ```"""
 
 
@@ -63,6 +68,29 @@ class TestAgentResult:
         )
         assert result.agent_name == "Diana Chen"
         assert result.score == 4
+
+    def test_optional_fields_defaults(self) -> None:
+        result = AgentResult(
+            agent_name="Test",
+            raw_analysis="test",
+            score=3,
+        )
+        assert result.verdict is None
+        assert result.strengths == []
+        assert result.concerns == []
+
+    def test_structured_fields(self) -> None:
+        result = AgentResult(
+            agent_name="Test",
+            raw_analysis="test",
+            score=4,
+            verdict="Strong candidate.",
+            strengths=["Python", "Leadership"],
+            concerns=["Cloud experience"],
+        )
+        assert result.verdict == "Strong candidate."
+        assert result.strengths == ["Python", "Leadership"]
+        assert result.concerns == ["Cloud experience"]
 
 
 class TestAnalysisResult:
@@ -127,9 +155,13 @@ class TestBuildUserMessage:
         assert "=== RESUME ===" in msg
         assert "=== END ===" in msg
 
-    def test_requests_score_format(self) -> None:
+    def test_requests_json_payload_format(self) -> None:
         msg = _build_user_message("job", "resume")
-        assert '{"score": X}' in msg
+        assert '"score": X' in msg
+        assert '"verdict"' in msg
+        assert '"strengths"' in msg
+        assert '"concerns"' in msg
+        assert "machine-parsed" in msg
 
 
 class TestAggregateReport:
@@ -454,6 +486,29 @@ class TestScoreParsing:
 
         for agent_result in result.agent_results:
             assert agent_result.score == 5
+
+    async def test_parses_full_json_payload(self) -> None:
+        """JSON block with verdict/strengths/concerns should populate AgentResult."""
+        mock_client = AsyncMock()
+        payload = (
+            '```json\n{"score": 4, "verdict": "Solid fit.", '
+            '"strengths": ["Python", "AWS"], "concerns": ["No Go"]}\n```'
+        )
+        mock_client.messages.create.return_value = _make_response(
+            f"## Analysis\nGood.\n\n{payload}"
+        )
+
+        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
+
+        for agent_result in result.agent_results:
+            assert agent_result.score == 4
+            assert agent_result.verdict == "Solid fit."
+            assert agent_result.strengths == ["Python", "AWS"]
+            assert agent_result.concerns == ["No Go"]
 
     async def test_parses_bare_json_format(self) -> None:
         mock_client = AsyncMock()
