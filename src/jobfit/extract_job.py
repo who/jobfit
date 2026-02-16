@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 from bs4 import BeautifulSoup, Tag
 
 from jobfit.errors import EXIT_PARSE, print_error
+
+logger = logging.getLogger("jobfit.extract_job")
 
 
 def extract_job_text(html: str) -> str:
@@ -26,6 +29,8 @@ def extract_job_text(html: str) -> str:
     Raises:
         SystemExit: If HTML is empty or contains no meaningful content (exit code 6).
     """
+    html_len = len(html) if html else 0
+    logger.debug("Extracting job text: input=%d chars", html_len)
     if not html or not html.strip():
         print_error(
             "No HTML content to extract",
@@ -84,23 +89,27 @@ def extract_job_text(html: str) -> str:
 
     # Try to find main content area
     main_content = None
+    extraction_method = "fallback"
 
     # Try <main> tag
     main_tag = soup.find("main")
     if main_tag:
         main_content = main_tag
+        extraction_method = "<main> tag"
 
     # Try <article> tag
     if not main_content:
         article_tag = soup.find("article")
         if article_tag:
             main_content = article_tag
+            extraction_method = "<article> tag"
 
     # Try role="main"
     if not main_content:
         role_main = soup.find(attrs={"role": "main"})
         if role_main:
             main_content = role_main
+            extraction_method = 'role="main"'
 
     # Try id/class containing job-related keywords
     if not main_content:
@@ -110,11 +119,13 @@ def extract_job_text(html: str) -> str:
             element = soup.find(id=lambda x: x and keyword in x.lower())
             if element:
                 main_content = element
+                extraction_method = f"id containing '{keyword}'"
                 break
             # Try class
             element = soup.find(class_=lambda x: x and keyword in x.lower())
             if element:
                 main_content = element
+                extraction_method = f"class containing '{keyword}'"
                 break
 
     # If no main content area found, use the body
@@ -122,12 +133,23 @@ def extract_job_text(html: str) -> str:
         main_content = soup.find("body")
         if not main_content:
             main_content = soup
+            extraction_method = "entire document"
+        else:
+            extraction_method = "<body> fallback"
+
+    logger.debug("Content extraction method: %s", extraction_method)
 
     # Extract text with formatting
     text = _extract_formatted_text(main_content)
 
     # Validate meaningful content
     text = text.strip()
+    word_count = len(text.split()) if text else 0
+    logger.debug(
+        "Extracted text: length=%d chars, word_count=%d",
+        len(text),
+        word_count,
+    )
     if not text:
         print_error(
             "No meaningful content found in HTML",

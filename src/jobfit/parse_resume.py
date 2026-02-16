@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ from jobfit.errors import EXIT_INPUT, print_error
 from jobfit.parse_docx import parse_docx
 from jobfit.parse_pdf import parse_pdf
 from jobfit.parse_txt import parse_txt
+
+logger = logging.getLogger("jobfit.parse_resume")
 
 
 class ResumeContent(BaseModel):
@@ -45,6 +48,7 @@ def parse_resume(path: Path) -> ResumeContent:
     """
     # Get file extension (case-insensitive)
     suffix = path.suffix.lower()
+    logger.debug("Resume file: path=%s, detected_format=%s", path, suffix)
 
     # Check if format is supported
     if suffix not in SUPPORTED_FORMATS:
@@ -56,7 +60,9 @@ def parse_resume(path: Path) -> ResumeContent:
 
     # Dispatch to the appropriate parser
     parser = SUPPORTED_FORMATS[suffix]
+    logger.debug("Dispatching to parser: %s", getattr(parser, "__name__", repr(parser)))
     text = parser(path)
+    logger.debug("Parser returned text: length=%d chars", len(text))
 
     # Calculate word count
     word_count = len(text.split())

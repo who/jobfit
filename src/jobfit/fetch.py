@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from urllib.parse import urlparse
 
@@ -9,6 +10,8 @@ from playwright.async_api import Error as PlaywrightError
 
 from jobfit.browser import create_browser_context
 from jobfit.errors import EXIT_NETWORK, print_error
+
+logger = logging.getLogger("jobfit.fetch")
 
 _PAGE_LOAD_TIMEOUT_MS = 30_000
 
@@ -56,6 +59,7 @@ async def fetch_page(url: str) -> str:
             - Login wall detection
             - CAPTCHA detection
     """
+    logger.debug("Fetching URL: %s (timeout=%dms)", url, _PAGE_LOAD_TIMEOUT_MS)
     try:
         async with create_browser_context() as context:
             page = await context.new_page()
@@ -75,6 +79,10 @@ async def fetch_page(url: str) -> str:
                 raise AssertionError("unreachable")
 
             status = response.status
+            final_url = response.url
+            logger.debug("Response: status=%d, final_url=%s", status, final_url)
+            response_headers = response.headers
+            logger.debug("Response headers: %s", dict(response_headers))
             if status == 403:
                 print_error(
                     f"HTTP 403 from {url}",
@@ -100,7 +108,6 @@ async def fetch_page(url: str) -> str:
                 )
 
             # Detect login wall via redirect
-            final_url = response.url
             if _is_login_redirect(url, final_url):
                 print_error(
                     f"login wall detected for {url}",
@@ -111,6 +118,7 @@ async def fetch_page(url: str) -> str:
                 )
 
             html = await page.content()
+            logger.debug("Page HTML: length=%d chars", len(html))
 
             # Detect CAPTCHA in page content
             if _CAPTCHA_PATTERN.search(html):

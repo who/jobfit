@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -26,6 +27,8 @@ from jobfit.parse_resume import parse_resume
 from jobfit.progress import configure as configure_progress
 from jobfit.progress import log_progress
 from jobfit.report import format_report
+
+logger = logging.getLogger("jobfit.cli")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,8 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose",
         "-v",
         action="store_true",
-        default=True,
-        help="Show step-by-step progress on stderr (default)",
+        default=False,
+        help="Enable debug logging with detailed pipeline information",
     )
     verbosity.add_argument(
         "--quiet",
@@ -100,8 +103,15 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
 
-    # Configure progress output based on --quiet flag
-    configure_progress(quiet=args.quiet)
+    # Configure progress output and debug logging
+    configure_progress(quiet=args.quiet, debug=args.verbose)
+
+    logger.debug(
+        "Parsed CLI arguments: url=%s, resume=%s, output=%s",
+        args.url,
+        args.resume,
+        args.output,
+    )
 
     # Validate API key before any network calls
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -111,6 +121,7 @@ def main(argv: list[str] | None = None) -> None:
             hint="Set it with: export ANTHROPIC_API_KEY='your-api-key'",
             exit_code=EXIT_API,
         )
+    logger.debug("ANTHROPIC_API_KEY loaded (%s...%s)", api_key[:3], api_key[-3:])
 
     # Validate resume file exists before starting pipeline
     resume_path = Path(args.resume)
@@ -125,6 +136,13 @@ def main(argv: list[str] | None = None) -> None:
     log_progress(f"Reading resume from {args.resume}...")
     resume = parse_resume(resume_path)
     log_progress(f"Parsed resume ({resume.word_count} words, {resume.format} format)")
+    logger.debug(
+        "Resume: path=%s, format=%s, text_length=%d, word_count=%d",
+        resume_path,
+        resume.format,
+        len(resume.text),
+        resume.word_count,
+    )
 
     # Run async pipeline (fetch, analyze)
     report = asyncio.run(_async_pipeline(args.url, resume.text))
@@ -146,19 +164,33 @@ async def _async_pipeline(url: str, resume_text: str) -> str:
     # Fetch job posting
     log_progress(f"Fetching job posting from {url}...")
     html = await fetch_page(url)
+    logger.debug("Fetched HTML: length=%d chars", len(html))
 
     # Extract job text from HTML
     job_text = extract_job_text(html)
     word_count = len(job_text.split())
     log_progress(f"Extracted job posting ({word_count} words)")
+    logger.debug(
+        "Extracted job text: length=%d chars, word_count=%d",
+        len(job_text),
+        word_count,
+    )
 
     # Analyze fit with Claude
     log_progress("Sending to Claude for analysis...")
     analysis = await analyze_fit(job_text, resume_text)
     log_progress("Analysis complete. Generating report...")
+    logger.debug(
+        "Analysis result: score=%d, model=%s, report_length=%d",
+        analysis.score,
+        analysis.model,
+        len(analysis.raw_report),
+    )
 
     # Format report
-    return format_report(analysis)
+    report = format_report(analysis)
+    logger.debug("Formatted report: length=%d chars", len(report))
+    return report
 
 
 def write_output(report: str, output_path: str | None) -> None:

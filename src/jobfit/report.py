@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 from jobfit.analyze import AnalysisResult
+
+logger = logging.getLogger("jobfit.report")
 
 
 def format_report(analysis: AnalysisResult) -> str:
@@ -47,6 +50,8 @@ def format_report(analysis: AnalysisResult) -> str:
             continue
         sections[normalized_name] = content.strip()
 
+    logger.debug("Report sections found: %s", list(sections.keys()))
+
     # Build the formatted report
     lines = [
         "# JobFit Analysis Report",
@@ -73,7 +78,10 @@ def format_report(analysis: AnalysisResult) -> str:
         else:
             # Section is missing - add a placeholder
             lines.append("_No information provided._")
+            logger.debug("Section missing from raw report: %s", section_name)
 
         lines.append("")
 
-    return "\n".join(lines).rstrip() + "\n"
+    result = "\n".join(lines).rstrip() + "\n"
+    logger.debug("Formatted report: length=%d chars", len(result))
+    return result

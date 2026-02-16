@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 
 import anthropic
 from pydantic import BaseModel
 
 from jobfit.errors import EXIT_API, print_error
+
+logger = logging.getLogger("jobfit.analyze")
 
 
 class AnalysisResult(BaseModel):
@@ -96,6 +100,10 @@ Provide your analysis in the following format:
 [Actionable recommendations to improve candidacy]"""
 
     # Call the API
+    logger.debug("API request: model=%s, max_tokens=4096", model)
+    logger.debug("System prompt:\n%s", system_message)
+    logger.debug("User prompt:\n%s", user_message)
+    request_start = time.monotonic()
     try:
         response = await client.messages.create(
             model=model,
@@ -143,8 +151,21 @@ Provide your analysis in the following format:
             exit_code=EXIT_API,
         )
 
-    # Extract the text from the response
+    # Log response details
+    latency = time.monotonic() - request_start
     raw_report = response.content[0].text
+    logger.debug(
+        "API response: latency=%.2fs, stop_reason=%s",
+        latency,
+        response.stop_reason,
+    )
+    if hasattr(response, "usage") and response.usage:
+        logger.debug(
+            "Token usage: input=%d, output=%d",
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+    logger.debug("Raw response text:\n%s", raw_report)
 
     # Extract the score from the report using regex, trying multiple patterns
     score: int | None = None
@@ -160,9 +181,12 @@ Provide your analysis in the following format:
         score_match = re.search(pattern, raw_report, re.IGNORECASE)
         if score_match:
             score = int(score_match.group(1))
+            logger.debug("Score parsed: value=%d, matched_pattern=%r", score, pattern)
             break
+        logger.debug("Score pattern did not match: %r", pattern)
 
     if score is None:
+        logger.debug("All score patterns failed to match")
         print_error(
             "failed to parse match score from Claude response",
             detail=(
