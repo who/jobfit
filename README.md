@@ -1,6 +1,6 @@
 # JobFit
 
-Analyze how well your resume matches a job posting. JobFit fetches job postings from URLs, parses your resume, and uses Claude AI to generate a detailed compatibility report with match scores, skills analysis, and actionable suggestions.
+Analyze how well your resume matches a job posting. JobFit parses job posting files and your resume, then uses Claude AI to generate a detailed compatibility report with match scores, skills analysis, and actionable suggestions.
 
 ## Installation
 
@@ -10,7 +10,6 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 git clone https://github.com/who/jobfit.git
 cd jobfit
 uv sync
-uv run playwright install chromium
 ```
 
 ## Configuration
@@ -27,39 +26,49 @@ Or create a `.env` file in the project root:
 ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
 
+Optionally, set a default resume path:
+
+```bash
+export RESUME_PATH=/path/to/resume.pdf
+```
+
 ## Usage
 
 ```bash
-jobfit --url URL --resume RESUME [OPTIONS]
+uv run jobfit --job FILE [--resume FILE] [OPTIONS]
 ```
 
 ### Required arguments
 
 | Flag | Description |
 |------|-------------|
-| `--url, -u` | URL of the job posting |
-| `--resume, -r` | Path to resume file (PDF, DOCX, or TXT) |
+| `--job, -j` | Path to job posting file (PDF, TXT, or MD) |
 
 ### Optional arguments
 
 | Flag | Description |
 |------|-------------|
+| `--resume, -r` | Path to resume file (PDF, DOCX, or TXT). Defaults to `RESUME_PATH` env var |
 | `--output, -o` | Write report to a file instead of stdout |
 | `--quiet, -q` | Suppress progress messages |
-| `--verbose, -v` | Show step-by-step progress (default) |
+| `--verbose, -v` | Enable debug logging |
 | `--version` | Show version number |
 
 ### Examples
 
 ```bash
 # Basic usage — prints report to stdout
-jobfit -u https://example.com/jobs/123 -r resume.pdf
+uv run jobfit -j posting.pdf -r resume.pdf
 
 # Save report to a file
-jobfit -u https://example.com/jobs/123 -r resume.docx -o report.md
+uv run jobfit -j posting.pdf -r resume.docx -o report.md
+
+# Using RESUME_PATH env var (no --resume needed)
+export RESUME_PATH=resume.pdf
+uv run jobfit -j posting.pdf
 
 # Quiet mode — no progress output, just the report
-jobfit -u https://example.com/jobs/123 -r resume.txt -q > report.md
+uv run jobfit -j posting.txt -r resume.pdf -q > report.md
 ```
 
 ## Output
