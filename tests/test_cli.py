@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from jobfit.errors import EXIT_API, EXIT_GENERAL, EXIT_USAGE
+from jobfit.errors import EXIT_API, EXIT_GENERAL, EXIT_INPUT, EXIT_USAGE
 from jobfit.main import main, write_output
 
 
@@ -15,6 +15,14 @@ from jobfit.main import main, write_output
 def _set_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set a dummy API key so arg-parsing tests don't fail on key validation."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
+
+
+@pytest.fixture()
+def job_file(tmp_path: Path) -> Path:
+    """Create a temporary job posting file for CLI tests."""
+    f = tmp_path / "job.pdf"
+    f.write_bytes(b"%PDF-1.4 fake job posting content")
+    return f
 
 
 @pytest.fixture()
@@ -33,6 +41,14 @@ def _mock_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("jobfit.main._async_pipeline", mock_coro)
 
 
+@pytest.fixture(autouse=True)
+def _mock_parse_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock parse_pdf so CLI tests don't need real PDF files."""
+    monkeypatch.setattr(
+        "jobfit.main.parse_pdf", lambda path: "Fake job posting text content"
+    )
+
+
 class TestRequiredArgs:
     """Required flags must be provided."""
 
@@ -41,12 +57,12 @@ class TestRequiredArgs:
             main([])
         assert exc_info.value.code == EXIT_USAGE
 
-    def test_missing_resume_exits_2(self) -> None:
+    def test_missing_resume_exits_2(self, job_file: Path) -> None:
         with pytest.raises(SystemExit) as exc_info:
-            main(["--url", "https://example.com/job"])
+            main(["--job", str(job_file)])
         assert exc_info.value.code == EXIT_USAGE
 
-    def test_missing_url_exits_2(self) -> None:
+    def test_missing_job_exits_2(self) -> None:
         with pytest.raises(SystemExit) as exc_info:
             main(["--resume", "resume.pdf"])
         assert exc_info.value.code == EXIT_USAGE
@@ -60,25 +76,32 @@ class TestRequiredArgs:
         assert captured.out == ""
         assert "error:" in captured.err
 
-    def test_valid_required_args_accepted(self, resume_file: Path) -> None:
+    def test_valid_required_args_accepted(
+        self, job_file: Path, resume_file: Path
+    ) -> None:
         # Should not raise
-        main(["--url", "https://example.com/job", "--resume", str(resume_file)])
+        main(["--job", str(job_file), "--resume", str(resume_file)])
+
+    def test_nonexistent_job_file_exits_3(self, resume_file: Path) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--job", "/nonexistent/job.pdf", "--resume", str(resume_file)])
+        assert exc_info.value.code == EXIT_INPUT
 
 
 class TestShortFlags:
     """Short flag forms work correctly."""
 
-    def test_short_url_and_resume(self, resume_file: Path) -> None:
-        main(["-u", "https://example.com/job", "-r", str(resume_file)])
+    def test_short_job_and_resume(self, job_file: Path, resume_file: Path) -> None:
+        main(["-j", str(job_file), "-r", str(resume_file)])
 
-    def test_short_output(self, resume_file: Path) -> None:
-        main(["-u", "https://example.com/job", "-r", str(resume_file), "-o", "out.md"])
+    def test_short_output(self, job_file: Path, resume_file: Path) -> None:
+        main(["-j", str(job_file), "-r", str(resume_file), "-o", "out.md"])
 
-    def test_short_quiet(self, resume_file: Path) -> None:
-        main(["-u", "https://example.com/job", "-r", str(resume_file), "-q"])
+    def test_short_quiet(self, job_file: Path, resume_file: Path) -> None:
+        main(["-j", str(job_file), "-r", str(resume_file), "-q"])
 
-    def test_short_verbose(self, resume_file: Path) -> None:
-        main(["-u", "https://example.com/job", "-r", str(resume_file), "-v"])
+    def test_short_verbose(self, job_file: Path, resume_file: Path) -> None:
+        main(["-j", str(job_file), "-r", str(resume_file), "-v"])
 
 
 class TestHelpAndVersion:
@@ -99,7 +122,7 @@ class TestHelpAndVersion:
             main(["--help"])
         captured = capsys.readouterr()
         expected_flags = [
-            "--url",
+            "--job",
             "--resume",
             "--output",
             "--verbose",
@@ -125,12 +148,12 @@ class TestHelpAndVersion:
 class TestMutualExclusion:
     """--quiet and --verbose are mutually exclusive."""
 
-    def test_quiet_and_verbose_conflict(self) -> None:
+    def test_quiet_and_verbose_conflict(self, job_file: Path) -> None:
         with pytest.raises(SystemExit) as exc_info:
             main(
                 [
-                    "--url",
-                    "https://example.com/job",
+                    "--job",
+                    str(job_file),
                     "--resume",
                     "resume.pdf",
                     "--quiet",
@@ -153,55 +176,56 @@ class TestApiKeyValidation:
     """ANTHROPIC_API_KEY validation at startup."""
 
     @staticmethod
-    def _valid_args(resume_file: Path) -> list[str]:
-        return ["--url", "https://example.com/job", "--resume", str(resume_file)]
+    def _valid_args(job_file: Path, resume_file: Path) -> list[str]:
+        return ["--job", str(job_file), "--resume", str(resume_file)]
 
     def test_missing_key_exits_5(
-        self, monkeypatch: pytest.MonkeyPatch, resume_file: Path
+        self, monkeypatch: pytest.MonkeyPatch, job_file: Path, resume_file: Path
     ) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setattr("jobfit.main.load_dotenv", lambda: None)
         with pytest.raises(SystemExit) as exc_info:
-            main(self._valid_args(resume_file))
+            main(self._valid_args(job_file, resume_file))
         assert exc_info.value.code == EXIT_API
 
     def test_empty_key_exits_5(
-        self, monkeypatch: pytest.MonkeyPatch, resume_file: Path
+        self, monkeypatch: pytest.MonkeyPatch, job_file: Path, resume_file: Path
     ) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "")
         with pytest.raises(SystemExit) as exc_info:
-            main(self._valid_args(resume_file))
+            main(self._valid_args(job_file, resume_file))
         assert exc_info.value.code == EXIT_API
 
     def test_whitespace_key_exits_5(
-        self, monkeypatch: pytest.MonkeyPatch, resume_file: Path
+        self, monkeypatch: pytest.MonkeyPatch, job_file: Path, resume_file: Path
     ) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")
         with pytest.raises(SystemExit) as exc_info:
-            main(self._valid_args(resume_file))
+            main(self._valid_args(job_file, resume_file))
         assert exc_info.value.code == EXIT_API
 
     def test_error_message_on_stderr(
         self,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
+        job_file: Path,
         resume_file: Path,
     ) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setattr("jobfit.main.load_dotenv", lambda: None)
         with pytest.raises(SystemExit):
-            main(self._valid_args(resume_file))
+            main(self._valid_args(job_file, resume_file))
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "ANTHROPIC_API_KEY" in captured.err
         assert "error:" in captured.err
 
     def test_valid_key_no_error(
-        self, monkeypatch: pytest.MonkeyPatch, resume_file: Path
+        self, monkeypatch: pytest.MonkeyPatch, job_file: Path, resume_file: Path
     ) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         # Should not raise on API key validation
-        main(self._valid_args(resume_file))
+        main(self._valid_args(job_file, resume_file))
 
 
 class TestWriteOutput:

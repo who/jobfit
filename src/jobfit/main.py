@@ -21,8 +21,7 @@ from jobfit.errors import (
     format_error,
     print_error,
 )
-from jobfit.extract_job import extract_job_text
-from jobfit.fetch import fetch_page
+from jobfit.parse_pdf import parse_pdf
 from jobfit.parse_resume import parse_resume
 from jobfit.progress import configure as configure_progress
 from jobfit.progress import log_progress
@@ -39,10 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     parser.add_argument(
-        "--url",
-        "-u",
+        "--job",
+        "-j",
         required=True,
-        help="URL of the job posting to analyze",
+        help="Path to job posting PDF file",
     )
     parser.add_argument(
         "--resume",
@@ -107,13 +106,13 @@ def main(argv: list[str] | None = None) -> None:
     configure_progress(quiet=args.quiet, debug=args.verbose)
 
     logger.debug(
-        "Parsed CLI arguments: url=%s, resume=%s, output=%s",
-        args.url,
+        "Parsed CLI arguments: job=%s, resume=%s, output=%s",
+        args.job,
         args.resume,
         args.output,
     )
 
-    # Validate API key before any network calls
+    # Validate API key
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key.strip():
         print_error(
@@ -122,6 +121,27 @@ def main(argv: list[str] | None = None) -> None:
             exit_code=EXIT_API,
         )
     logger.debug("ANTHROPIC_API_KEY loaded (%s...%s)", api_key[:3], api_key[-3:])
+
+    # Validate job file exists before starting pipeline
+    job_path = Path(args.job)
+    if not job_path.exists():
+        print_error(
+            f"job file not found: {args.job}",
+            hint="Check that the file path is correct.",
+            exit_code=EXIT_INPUT,
+        )
+
+    # Parse job posting PDF (synchronous)
+    log_progress(f"Reading job posting from {args.job}...")
+    job_text = parse_pdf(job_path)
+    job_word_count = len(job_text.split())
+    log_progress(f"Parsed job posting ({job_word_count} words)")
+    logger.debug(
+        "Job posting: path=%s, text_length=%d, word_count=%d",
+        job_path,
+        len(job_text),
+        job_word_count,
+    )
 
     # Validate resume file exists before starting pipeline
     resume_path = Path(args.resume)
@@ -144,38 +164,23 @@ def main(argv: list[str] | None = None) -> None:
         resume.word_count,
     )
 
-    # Run async pipeline (fetch, analyze)
-    report = asyncio.run(_async_pipeline(args.url, resume.text))
+    # Run async pipeline (analyze)
+    report = asyncio.run(_async_pipeline(job_text, resume.text))
 
     # Write output
     write_output(report, args.output)
 
 
-async def _async_pipeline(url: str, resume_text: str) -> str:
-    """Run the async portion of the pipeline: fetch, extract, analyze, format.
+async def _async_pipeline(job_text: str, resume_text: str) -> str:
+    """Run the async portion of the pipeline: analyze and format.
 
     Args:
-        url: Job posting URL to fetch.
+        job_text: Extracted job posting text.
         resume_text: Parsed resume text.
 
     Returns:
         Formatted markdown report string.
     """
-    # Fetch job posting
-    log_progress(f"Fetching job posting from {url}...")
-    html = await fetch_page(url)
-    logger.debug("Fetched HTML: length=%d chars", len(html))
-
-    # Extract job text from HTML
-    job_text = extract_job_text(html)
-    word_count = len(job_text.split())
-    log_progress(f"Extracted job posting ({word_count} words)")
-    logger.debug(
-        "Extracted job text: length=%d chars, word_count=%d",
-        len(job_text),
-        word_count,
-    )
-
     # Analyze fit with multi-agent review board
     log_progress("Running multi-agent review board analysis...")
     analysis = await analyze_fit(job_text, resume_text)
