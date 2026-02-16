@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         "-o",
         default=None,
-        help="Write report to file instead of stdout",
+        help="Write report to file (default: <job-stem>-jobfit-results.md)",
     )
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
@@ -103,6 +103,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.error = error_handler  # type: ignore[assignment]
 
     args = parser.parse_args(argv)
+
+    # Derive default output path from job filename when -o is not provided
+    if args.output is None:
+        stem = Path(args.job).stem
+        args.output = f"{stem}-jobfit-results.md"
 
     # Resolve --resume: CLI arg takes precedence over RESUME_PATH env var
     if args.resume is None:

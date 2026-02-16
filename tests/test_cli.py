@@ -228,6 +228,40 @@ class TestApiKeyValidation:
         main(self._valid_args(job_file, resume_file))
 
 
+class TestDefaultOutputPath:
+    """When -o is omitted, output path is derived from -j filename."""
+
+    def test_default_output_derived_from_job(
+        self,
+        job_file: Path,
+        resume_file: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        main(["-j", str(job_file), "-r", str(resume_file)])
+        # job_file is "job.pdf", so output should be "job-jobfit-results.md"
+        expected = tmp_path / "job-jobfit-results.md"
+        assert expected.exists()
+
+    def test_explicit_output_overrides_default(
+        self, job_file: Path, resume_file: Path, tmp_path: Path
+    ) -> None:
+        explicit = tmp_path / "custom.md"
+        main(["-j", str(job_file), "-r", str(resume_file), "-o", str(explicit)])
+        assert explicit.exists()
+
+    def test_derived_name_strips_extension(
+        self, tmp_path: Path, resume_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        job = tmp_path / "senior-engineer.txt"
+        job.write_text("Job posting content", encoding="utf-8")
+        main(["-j", str(job), "-r", str(resume_file)])
+        expected = tmp_path / "senior-engineer-jobfit-results.md"
+        assert expected.exists()
+
+
 class TestWriteOutput:
     """Tests for the write_output function."""
 
