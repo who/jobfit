@@ -14,7 +14,7 @@
 Job seekers spend significant time manually reading through job postings and trying to assess whether their resume is a good match for a position. This process is tedious, subjective, and error-prone — candidates often miss key requirements or overestimate their fit, leading to wasted applications or missed opportunities. There is no quick, automated way to get an objective assessment of how well a resume aligns with a specific job posting, identify skill gaps, or receive actionable suggestions for improving candidacy.
 
 ### Proposed Solution
-JobFit is a command-line tool that automates resume-to-job-posting analysis. The user provides a job posting URL and a path to their resume file. The tool fetches the job posting using Playwright with a consumer-style User-Agent to avoid bot detection, parses the resume (supporting PDF, DOCX, and plain text formats), and sends both to Claude's API for detailed analysis. The output is a structured Markdown report covering match score, skills matrix, experience alignment, keyword analysis, culture fit notes, and tailored resume suggestions.
+JobFit is a command-line tool that automates resume-to-job-posting analysis. The user provides a job posting file (PDF, TXT, or MD) and a path to their resume file. The tool parses both documents (supporting PDF, DOCX, and plain text formats) and sends them to Claude's API for detailed analysis. The output is a structured Markdown report covering match score, skills matrix, experience alignment, keyword analysis, culture fit notes, and tailored resume suggestions.
 
 ### Success Metrics
 - **Analysis accuracy**: Users rate the match assessment as useful/accurate at least 80% of the time (self-reported)
@@ -42,7 +42,7 @@ Job seekers — primarily developers, engineers, and other technical professiona
 ## Requirements
 
 ### Functional Requirements
-[P0] FR-001: The CLI shall accept a `--url` flag with a job posting URL and fetch the page content using Playwright with a consumer-style User-Agent header
+[P0] FR-001: The CLI shall accept a `--job` flag with a path to a job posting file (PDF, TXT, or MD) and parse its content
 [P0] FR-002: The CLI shall accept a `--resume` flag with a file path and parse the resume content (supporting PDF, DOCX, and plain text formats)
 [P0] FR-003: The CLI shall send the job posting text and resume content to Claude's API and generate a detailed match analysis
 [P0] FR-004: The CLI shall output a structured Markdown report to stdout containing: overall match score (1-10), skills matrix, experience alignment, keyword analysis, culture fit notes, and tailored resume suggestions
@@ -52,8 +52,8 @@ Job seekers — primarily developers, engineers, and other technical professiona
 
 ### Non-Functional Requirements
 [P0] NFR-001: The CLI shall provide clear, actionable error messages for all failure modes (missing API key, invalid URL, unreadable resume, network errors, unsupported file format)
-[P0] NFR-002: The CLI shall complete the full fetch-and-analyze pipeline within 120 seconds for typical job postings
-[P1] NFR-003: The CLI shall gracefully handle pages that cannot be fetched (login walls, CAPTCHAs, timeouts) with descriptive error messages
+[P0] NFR-002: The CLI shall complete the full parse-and-analyze pipeline within 120 seconds for typical job postings
+[P1] NFR-003: The CLI shall gracefully handle files that cannot be read (missing, permissions, unsupported format) with descriptive error messages
 [P1] NFR-004: The CLI shall respect the `NO_COLOR` environment variable for progress output
 [P2] NFR-005: The CLI shall support `--help` and `--version` flags
 
@@ -62,7 +62,7 @@ Job seekers — primarily developers, engineers, and other technical professiona
 ### Command Structure
 
 ```
-jobfit --url <url> --resume <path> [--output <path>] [--verbose] [--help] [--version]
+jobfit --job <path> --resume <path> [--output <path>] [--verbose] [--help] [--version]
 ```
 
 This is a flat, single-command tool with no subcommands.
@@ -71,8 +71,8 @@ This is a flat, single-command tool with no subcommands.
 
 | Flag | Short | Type | Default | Required | Description |
 |------|-------|------|---------|----------|-------------|
-| --url | -u | string | — | Yes | URL of the job posting to analyze |
-| --resume | -r | string | — | Yes | Path to resume file (PDF, DOCX, or TXT) |
+| --job | -j | string | — | Yes | Path to job posting file (PDF, TXT, or MD) |
+| --resume | -r | string | — | No | Path to resume file (PDF, DOCX, or TXT). Defaults to `RESUME_PATH` env var |
 | --output | -o | string | — | No | Write report to file instead of stdout |
 | --verbose | -v | bool | true | No | Show step-by-step progress on stderr |
 | --quiet | -q | bool | false | No | Suppress progress messages |
@@ -83,7 +83,7 @@ This is a flat, single-command tool with no subcommands.
 
 | Source | Support | Notes |
 |--------|---------|-------|
-| Command-line flags | Yes | Primary input method (`--url`, `--resume`) |
+| Command-line flags | Yes | Primary input method (`--job`, `--resume`) |
 | Standard input (stdin) | No | Not supported in v1 |
 | File input | Yes | Resume file via `--resume` flag |
 | Environment variables | Yes | `ANTHROPIC_API_KEY` for API authentication |
@@ -119,8 +119,8 @@ This is a flat, single-command tool with no subcommands.
 
 #### Progress Output (stderr)
 ```
-Fetching job posting from https://example.com/job/123...
-Successfully fetched job posting (2,450 words)
+Reading job posting from ./posting.pdf...
+Parsed job posting (2,450 words, PDF format)
 Reading resume from ./resume.pdf...
 Parsed resume (1,200 words, PDF format)
 Sending to Claude for analysis...
@@ -135,9 +135,9 @@ Analysis complete. Generating report...
 | 1 | General error | Unspecified error occurred |
 | 2 | Usage error | Missing required flags or invalid flag values |
 | 3 | Input error | Resume file not found, unreadable, or unsupported format |
-| 4 | Network error | Failed to fetch job posting (timeout, DNS, HTTP error) |
+| 4 | Network error | Reserved |
 | 5 | API error | Claude API failure (missing key, rate limit, server error) |
-| 6 | Parse error | Could not extract meaningful content from job posting page |
+| 6 | Parse error | Could not extract meaningful content from job posting file |
 
 ### Error Messages
 
@@ -158,11 +158,11 @@ hint: export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ```
-error: could not fetch job posting from https://example.com/job/123
+error: could not read job posting from ./posting.rtf
 
-  the page returned a 403 status code, which may indicate bot detection or a login wall
+  unsupported job posting format: .rtf
 
-hint: try opening the URL in a browser to verify it's publicly accessible
+hint: supported formats: .pdf, .txt, .md
 ```
 
 ```
@@ -177,13 +177,12 @@ hint: convert your resume to PDF or plain text and try again
 
 ### Components
 - **CLI Parser**: `argparse` or `click` for argument parsing
-- **Page Fetcher**: Playwright with consumer-style User-Agent for fetching job postings
+- **Job Posting Parser**: PDF (PyMuPDF or pdfplumber), plain text/Markdown (built-in)
 - **Resume Parser**: PDF (PyMuPDF or pdfplumber), DOCX (python-docx), plain text (built-in)
 - **AI Analyzer**: Anthropic Python SDK for Claude API calls
 - **Report Generator**: Formats Claude's analysis into structured Markdown
 
 ### Dependencies
-- `playwright` — Browser automation for fetching job postings
 - `anthropic` — Claude API client
 - `pymupdf` or `pdfplumber` — PDF parsing
 - `python-docx` — DOCX parsing
@@ -196,14 +195,14 @@ hint: convert your resume to PDF or plain text and try again
 **Goal**: Basic CLI structure with argument parsing and resume reading
 **Deliverables**:
 - Project setup with uv, pyproject.toml
-- Argument parsing with --url, --resume, --output, --help, --version
+- Argument parsing with --job, --resume, --output, --help, --version
 - Resume file reading (PDF, DOCX, TXT)
 - Error handling for invalid inputs
 
 ### Phase 2: Core Pipeline
 **Goal**: End-to-end fetch, analyze, and report
 **Deliverables**:
-- Playwright-based job posting fetcher with consumer User-Agent
+- Job posting file parser (PDF, TXT, MD)
 - Claude API integration for match analysis
 - Markdown report generation
 - Verbose progress logging to stderr
@@ -222,7 +221,7 @@ hint: convert your resume to PDF or plain text and try again
 - **Requirements Covered**: FR-006, NFR-005
 - **Tasks**:
   - Set up project structure with uv and pyproject.toml
-  - Implement argument parsing (--url, --resume, --output, --help, --version)
+  - Implement argument parsing (--job, --resume, --output, --help, --version)
   - Validate ANTHROPIC_API_KEY environment variable
   - Define exit codes and error message formatting
 
@@ -234,13 +233,13 @@ hint: convert your resume to PDF or plain text and try again
   - Implement plain text resume reading
   - Add format detection and validation
 
-### Epic: Job Posting Fetching
-- **Requirements Covered**: FR-001, NFR-003
+### Epic: Job Posting Parsing
+- **Requirements Covered**: FR-001
 - **Tasks**:
-  - Set up Playwright with consumer User-Agent
-  - Implement page fetching with timeout handling
-  - Extract meaningful text content from HTML
-  - Handle error cases (login walls, CAPTCHAs, network failures)
+  - Implement PDF job posting parsing
+  - Implement plain text and Markdown reading
+  - Add format detection and validation
+  - Handle error cases (missing file, unsupported format)
 
 ### Epic: AI Analysis & Report
 - **Requirements Covered**: FR-003, FR-004, FR-005, FR-007
