@@ -176,10 +176,13 @@ async def _async_pipeline(url: str, resume_text: str) -> str:
         word_count,
     )
 
-    # Analyze fit with Claude
-    log_progress("Sending to Claude for analysis...")
+    # Analyze fit with multi-agent review board
+    log_progress("Running multi-agent review board analysis...")
     analysis = await analyze_fit(job_text, resume_text)
-    log_progress("Analysis complete. Generating report...")
+    log_progress(
+        f"Analysis complete ({len(analysis.agent_results)} agents, "
+        f"score: {analysis.score}/10). Generating report..."
+    )
     logger.debug(
         "Analysis result: score=%d, model=%s, report_length=%d",
         analysis.score,

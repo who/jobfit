@@ -1,10 +1,13 @@
-"""Claude API integration for job-resume fit analysis."""
+"""Claude API integration for multi-agent job-resume fit analysis."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
 import time
+from pathlib import Path
 
 import anthropic
 from pydantic import BaseModel
@@ -13,60 +16,85 @@ from jobfit.errors import EXIT_API, print_error
 
 logger = logging.getLogger("jobfit.analyze")
 
+# Directory containing agent persona .md files
+AGENTS_DIR = Path(__file__).parent / "agents"
+
+
+class AgentResult(BaseModel):
+    """Result from a single agent's analysis."""
+
+    agent_name: str
+    raw_analysis: str
+    score: int
+
 
 class AnalysisResult(BaseModel):
-    """Result from Claude API job-resume fit analysis."""
+    """Result from the multi-agent job-resume fit analysis."""
 
     raw_report: str
     score: int
     model: str
+    agent_results: list[AgentResult] = []
 
 
-async def analyze_fit(
-    job_text: str,
-    resume_text: str,
-    model: str = "claude-sonnet-4-5-20250929",
-) -> AnalysisResult:
-    """Analyze job-resume fit using Claude API.
+def _load_agent_personas() -> list[tuple[str, str]]:
+    """Load all agent persona .md files from the agents directory.
+
+    Returns:
+        List of (agent_name, persona_content) tuples.
+
+    Raises:
+        SystemExit: If no agent files are found.
+    """
+    if not AGENTS_DIR.is_dir():
+        print_error(
+            f"agents directory not found: {AGENTS_DIR}",
+            hint="Ensure src/jobfit/agents/ exists with agent persona .md files",
+            exit_code=EXIT_API,
+        )
+
+    agents = []
+    for md_file in sorted(AGENTS_DIR.glob("agent_*.md")):
+        content = md_file.read_text(encoding="utf-8")
+        # Extract agent name from the first line (e.g., "# Agent: Diana Chen — ...")
+        first_line = content.split("\n", 1)[0]
+        match = re.match(r"#\s*Agent:\s*(.+?)(?:\s*—|\s*-|\s*$)", first_line)
+        name = match.group(1).strip() if match else md_file.stem
+        agents.append((name, content))
+        logger.debug("Loaded agent persona: %s from %s", name, md_file.name)
+
+    if not agents:
+        print_error(
+            "no agent persona files found",
+            hint=f"Add agent_*.md files to {AGENTS_DIR}",
+            exit_code=EXIT_API,
+        )
+
+    logger.debug("Loaded %d agent personas", len(agents))
+    return agents
+
+
+def _get_model() -> str:
+    """Get the Claude model from CLAUDE_MODEL env var or default.
+
+    Returns:
+        Model string to use for API calls.
+    """
+    return os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")
+
+
+def _build_user_message(job_text: str, resume_text: str) -> str:
+    """Build the user message for agent analysis.
 
     Args:
         job_text: The job posting text.
         resume_text: The resume text.
-        model: Claude model to use (default: claude-sonnet-4-5-20250929).
 
     Returns:
-        AnalysisResult with raw markdown report, extracted score, and model used.
-
-    Raises:
-        SystemExit: If API call fails (exit code 5).
+        Formatted user message string.
     """
-    # Initialize Anthropic client (auto-reads ANTHROPIC_API_KEY from env)
-    try:
-        client = anthropic.AsyncAnthropic()
-    except Exception as e:
-        print_error(
-            "failed to initialize Anthropic client",
-            detail=str(e),
-            hint="Ensure ANTHROPIC_API_KEY environment variable is set",
-            exit_code=EXIT_API,
-        )
-
-    # Build the prompt
-    system_message = """You are an expert job-resume fit analyzer.
-Your role is to analyze how well a candidate's resume matches a job posting
-and provide actionable insights.
-
-You must produce a detailed markdown report with exactly these sections:
-1. Overall Match Score (X/10)
-2. Skills Matrix (table format)
-3. Experience Alignment
-4. Keyword Analysis
-5. Culture Fit Notes
-6. Suggestions
-
-Be thorough, specific, and constructive in your analysis."""
-
-    user_message = f"""Please analyze the fit between this job posting and resume.
+    return f"""Evaluate this candidate's resume against the job posting \
+from your specialized perspective.
 
 === JOB POSTING ===
 {job_text}
@@ -76,45 +104,56 @@ Be thorough, specific, and constructive in your analysis."""
 
 === END ===
 
-Provide your analysis in the following format:
+Provide your evaluation as follows:
 
-# JobFit Analysis Report
+## Score: X/5
 
-## Overall Match Score: X/10
+## Analysis
+[Your detailed evaluation from your specialized perspective, \
+referencing specific evidence from the resume]
 
-## Skills Matrix
-| Skill | Required | You Have | Match |
-|-------|----------|----------|-------|
-[Fill in with relevant skills]
+## Key Strengths
+[Bullet points of strengths relevant to your evaluation focus]
 
-## Experience Alignment
-[Analyze how work history maps to role requirements]
+## Concerns
+[Bullet points of concerns or red flags from your perspective]
 
-## Keyword Analysis
-[Key terms from posting found/missing in resume]
+## Verdict
+[One-paragraph final assessment]"""
 
-## Culture Fit Notes
-[Observations about company culture vs resume tone/experience]
 
-## Suggestions
-[Actionable recommendations to improve candidacy]"""
+async def _run_agent(
+    client: anthropic.AsyncAnthropic,
+    model: str,
+    agent_name: str,
+    persona: str,
+    job_text: str,
+    resume_text: str,
+) -> AgentResult:
+    """Run a single agent's analysis.
 
-    # Call the API
-    logger.debug("API request: model=%s, max_tokens=4096", model)
-    logger.debug("System prompt:\n%s", system_message)
-    logger.debug("User prompt:\n%s", user_message)
+    Args:
+        client: The Anthropic async client.
+        model: Claude model to use.
+        agent_name: Name of the agent.
+        persona: Full persona markdown content (used as system prompt).
+        job_text: The job posting text.
+        resume_text: The resume text.
+
+    Returns:
+        AgentResult with the agent's analysis and score.
+    """
+    user_message = _build_user_message(job_text, resume_text)
+
+    logger.debug("Agent %s: sending request with model=%s", agent_name, model)
     request_start = time.monotonic()
+
     try:
         response = await client.messages.create(
             model=model,
             max_tokens=4096,
-            system=system_message,
-            messages=[
-                {
-                    "role": "user",
-                    "content": user_message,
-                }
-            ],
+            system=persona,
+            messages=[{"role": "user", "content": user_message}],
         )
     except anthropic.AuthenticationError as e:
         print_error(
@@ -146,58 +185,165 @@ Provide your analysis in the following format:
         )
     except Exception as e:
         print_error(
-            "unexpected API error",
+            f"unexpected API error for agent {agent_name}",
             detail=str(e),
             exit_code=EXIT_API,
         )
 
-    # Log response details
     latency = time.monotonic() - request_start
-    raw_report = response.content[0].text
+    raw_analysis = response.content[0].text
     logger.debug(
-        "API response: latency=%.2fs, stop_reason=%s",
+        "Agent %s: response in %.2fs, stop_reason=%s",
+        agent_name,
         latency,
         response.stop_reason,
     )
     if hasattr(response, "usage") and response.usage:
         logger.debug(
-            "Token usage: input=%d, output=%d",
+            "Agent %s: tokens input=%d, output=%d",
+            agent_name,
             response.usage.input_tokens,
             response.usage.output_tokens,
         )
-    logger.debug("Raw response text:\n%s", raw_report)
 
-    # Extract the score from the report using regex, trying multiple patterns
-    score: int | None = None
+    # Parse score from response (X/5 format)
+    score = 3  # default if parsing fails
     score_patterns = [
-        # Strict: markdown heading format
-        r"##\s*Overall Match Score:\s*(\d+)\s*/\s*10",
-        # Medium: with optional bold/markdown markers
-        r"\*{0,2}Overall Match Score\*{0,2}\s*:?\s*(\d+)\s*/\s*10",
-        # Loose: any "X/10" near "score" context
-        r"(?:match\s+)?score\s*:?\s*(\d+)\s*/\s*10",
+        r"##\s*Score:\s*(\d+)\s*/\s*5",
+        r"\*{0,2}Score\*{0,2}\s*:?\s*(\d+)\s*/\s*5",
+        r"score\s*:?\s*(\d+)\s*/\s*5",
     ]
     for pattern in score_patterns:
-        score_match = re.search(pattern, raw_report, re.IGNORECASE)
+        score_match = re.search(pattern, raw_analysis, re.IGNORECASE)
         if score_match:
-            score = int(score_match.group(1))
-            logger.debug("Score parsed: value=%d, matched_pattern=%r", score, pattern)
-            break
-        logger.debug("Score pattern did not match: %r", pattern)
-
-    if score is None:
-        logger.debug("All score patterns failed to match")
-        print_error(
-            "failed to parse match score from Claude response",
-            detail=(
-                "The response did not contain a valid 'Overall Match Score: X/10' line"
-            ),
-            hint="This may indicate an issue with the API response format",
-            exit_code=EXIT_API,
+            parsed = int(score_match.group(1))
+            if 1 <= parsed <= 5:
+                score = parsed
+                logger.debug(
+                    "Agent %s: parsed score=%d with pattern=%r",
+                    agent_name,
+                    score,
+                    pattern,
+                )
+                break
+    else:
+        logger.debug(
+            "Agent %s: could not parse score, using default=%d",
+            agent_name,
+            score,
         )
+
+    return AgentResult(agent_name=agent_name, raw_analysis=raw_analysis, score=score)
+
+
+def _aggregate_report(agent_results: list[AgentResult], model: str) -> AnalysisResult:
+    """Aggregate individual agent results into a unified report.
+
+    Args:
+        agent_results: List of individual agent analysis results.
+        model: The model used for analysis.
+
+    Returns:
+        AnalysisResult with combined report and composite score.
+    """
+    # Compute composite score: average of agent scores mapped to 1-10 scale
+    if agent_results:
+        avg_score = sum(r.score for r in agent_results) / len(agent_results)
+        composite_score = round(avg_score * 2)  # Map 1-5 to 2-10
+        composite_score = max(1, min(10, composite_score))
+    else:
+        composite_score = 0
+
+    # Build the combined report
+    lines = [
+        "# JobFit Analysis Report",
+        "",
+        f"## Overall Match Score: {composite_score}/10",
+        "",
+        "---",
+        "",
+    ]
+
+    for result in agent_results:
+        lines.append(f"## {result.agent_name} — Score: {result.score}/5")
+        lines.append("")
+        lines.append(result.raw_analysis)
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # Add summary table
+    lines.append("## Score Summary")
+    lines.append("")
+    lines.append("| Evaluator | Score |")
+    lines.append("|-----------|-------|")
+    for result in agent_results:
+        lines.append(f"| {result.agent_name} | {result.score}/5 |")
+    lines.append(f"| **Composite** | **{composite_score}/10** |")
+    lines.append("")
+
+    raw_report = "\n".join(lines)
 
     return AnalysisResult(
         raw_report=raw_report,
-        score=score,
+        score=composite_score,
         model=model,
+        agent_results=agent_results,
     )
+
+
+async def analyze_fit(
+    job_text: str,
+    resume_text: str,
+    model: str | None = None,
+) -> AnalysisResult:
+    """Analyze job-resume fit using multiple agent personas concurrently.
+
+    Each agent evaluates the resume from their specialized perspective.
+    Results are aggregated into a unified report with a composite score.
+
+    Args:
+        job_text: The job posting text.
+        resume_text: The resume text.
+        model: Claude model to use (overrides CLAUDE_MODEL env var).
+
+    Returns:
+        AnalysisResult with combined report, composite score, and per-agent results.
+
+    Raises:
+        SystemExit: If API call fails (exit code 5).
+    """
+    if model is None:
+        model = _get_model()
+
+    # Load agent personas
+    agents = _load_agent_personas()
+    logger.debug("Running %d agents with model=%s", len(agents), model)
+
+    # Initialize Anthropic client
+    try:
+        client = anthropic.AsyncAnthropic()
+    except Exception as e:
+        print_error(
+            "failed to initialize Anthropic client",
+            detail=str(e),
+            hint="Ensure ANTHROPIC_API_KEY environment variable is set",
+            exit_code=EXIT_API,
+        )
+
+    # Run all agents concurrently
+    tasks = [
+        _run_agent(client, model, name, persona, job_text, resume_text)
+        for name, persona in agents
+    ]
+    agent_results = await asyncio.gather(*tasks)
+
+    # Aggregate results
+    result = _aggregate_report(list(agent_results), model)
+    logger.debug(
+        "Analysis complete: composite_score=%d, agents=%d",
+        result.score,
+        len(result.agent_results),
+    )
+
+    return result

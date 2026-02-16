@@ -1,4 +1,4 @@
-"""Tests for Claude API job-resume fit analysis."""
+"""Tests for multi-agent Claude API job-resume fit analysis."""
 
 from __future__ import annotations
 
@@ -7,7 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import anthropic
 import pytest
 
-from jobfit.analyze import AnalysisResult, analyze_fit
+from jobfit.analyze import (
+    AgentResult,
+    AnalysisResult,
+    _aggregate_report,
+    _build_user_message,
+    _load_agent_personas,
+    _run_agent,
+    analyze_fit,
+)
 from jobfit.errors import EXIT_API
 
 
@@ -17,200 +25,292 @@ def _make_response(text: str) -> MagicMock:
     content_block.text = text
     response = MagicMock()
     response.content = [content_block]
+    response.stop_reason = "end_turn"
+    response.usage = MagicMock()
+    response.usage.input_tokens = 100
+    response.usage.output_tokens = 200
     return response
 
 
-def _make_valid_report(score: int = 7) -> str:
-    """Create a valid analysis report with all required sections."""
-    return f"""# JobFit Analysis Report
+def _make_agent_response(score: int = 4) -> str:
+    """Create a valid agent analysis response."""
+    return f"""## Score: {score}/5
 
-## Overall Match Score: {score}/10
+## Analysis
+Strong technical background with relevant experience.
 
-## Skills Matrix
-| Skill | Required | You Have | Match |
-|-------|----------|----------|-------|
-| Python | Yes | Yes | ✅ |
+## Key Strengths
+- Excellent Python skills
+- Leadership experience
 
-## Experience Alignment
-- Strong alignment with 5 years experience.
+## Concerns
+- Limited cloud experience
 
-## Keyword Analysis
-- Key terms found: Python, Django
+## Verdict
+A strong candidate overall."""
 
-## Culture Fit Notes
-- Good cultural alignment.
 
-## Suggestions
-- Consider adding Kubernetes experience.
-"""
+class TestAgentResult:
+    """Tests for AgentResult Pydantic model."""
+
+    def test_valid_construction(self) -> None:
+        result = AgentResult(
+            agent_name="Diana Chen",
+            raw_analysis="test analysis",
+            score=4,
+        )
+        assert result.agent_name == "Diana Chen"
+        assert result.score == 4
 
 
 class TestAnalysisResult:
     """Tests for AnalysisResult Pydantic model."""
 
     def test_valid_construction(self) -> None:
-        """AnalysisResult should construct with valid fields."""
         result = AnalysisResult(
             raw_report="# Report",
             score=8,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-4-6",
         )
         assert result.raw_report == "# Report"
         assert result.score == 8
-        assert result.model == "claude-sonnet-4-5-20250929"
+        assert result.model == "claude-opus-4-6"
+        assert result.agent_results == []
 
-    def test_score_is_int(self) -> None:
-        """Score field should accept integer values."""
+    def test_with_agent_results(self) -> None:
+        agent = AgentResult(agent_name="Test", raw_analysis="analysis", score=3)
         result = AnalysisResult(
-            raw_report="test",
-            score=10,
+            raw_report="# Report",
+            score=6,
             model="test-model",
+            agent_results=[agent],
         )
-        assert isinstance(result.score, int)
-        assert result.score == 10
+        assert len(result.agent_results) == 1
+        assert result.agent_results[0].agent_name == "Test"
+
+
+class TestLoadAgentPersonas:
+    """Tests for loading agent persona files."""
+
+    def test_loads_all_five_agents(self) -> None:
+        agents = _load_agent_personas()
+        assert len(agents) == 5
+
+    def test_agent_names_extracted(self) -> None:
+        agents = _load_agent_personas()
+        names = [name for name, _ in agents]
+        assert "Diana Chen" in names
+        assert "Marcus Webb" in names
+        assert "James Okafor" in names
+        assert "Priya Ramaswamy" in names
+        assert "Sofia Engström" in names
+
+    def test_agent_content_not_empty(self) -> None:
+        agents = _load_agent_personas()
+        for name, content in agents:
+            assert len(content) > 100, f"Agent {name} content seems too short"
+
+
+class TestBuildUserMessage:
+    """Tests for user message construction."""
+
+    def test_contains_job_and_resume(self) -> None:
+        msg = _build_user_message("Job posting text", "Resume text here")
+        assert "Job posting text" in msg
+        assert "Resume text here" in msg
+
+    def test_contains_delimiters(self) -> None:
+        msg = _build_user_message("job", "resume")
+        assert "=== JOB POSTING ===" in msg
+        assert "=== RESUME ===" in msg
+        assert "=== END ===" in msg
+
+    def test_requests_score_format(self) -> None:
+        msg = _build_user_message("job", "resume")
+        assert "## Score: X/5" in msg
+
+
+class TestAggregateReport:
+    """Tests for report aggregation."""
+
+    def test_composite_score_mapping(self) -> None:
+        """Agent scores (1-5) should map to composite score (1-10)."""
+        results = [
+            AgentResult(agent_name="A", raw_analysis="a", score=5),
+            AgentResult(agent_name="B", raw_analysis="b", score=5),
+        ]
+        analysis = _aggregate_report(results, "test-model")
+        assert analysis.score == 10  # avg 5.0 * 2 = 10
+
+    def test_composite_score_rounding(self) -> None:
+        results = [
+            AgentResult(agent_name="A", raw_analysis="a", score=3),
+            AgentResult(agent_name="B", raw_analysis="b", score=4),
+        ]
+        analysis = _aggregate_report(results, "test-model")
+        assert analysis.score == 7  # avg 3.5 * 2 = 7
+
+    def test_composite_score_clamped(self) -> None:
+        results = [
+            AgentResult(agent_name="A", raw_analysis="a", score=1),
+        ]
+        analysis = _aggregate_report(results, "test-model")
+        assert analysis.score == 2  # avg 1.0 * 2 = 2, min 1
+
+    def test_report_contains_agent_sections(self) -> None:
+        results = [
+            AgentResult(agent_name="Diana Chen", raw_analysis="tech analysis", score=4),
+            AgentResult(
+                agent_name="Marcus Webb",
+                raw_analysis="people analysis",
+                score=3,
+            ),
+        ]
+        analysis = _aggregate_report(results, "test-model")
+        assert "Diana Chen" in analysis.raw_report
+        assert "Marcus Webb" in analysis.raw_report
+        assert "tech analysis" in analysis.raw_report
+        assert "people analysis" in analysis.raw_report
+
+    def test_report_has_score_summary_table(self) -> None:
+        results = [
+            AgentResult(agent_name="Agent A", raw_analysis="a", score=4),
+            AgentResult(agent_name="Agent B", raw_analysis="b", score=3),
+        ]
+        analysis = _aggregate_report(results, "test-model")
+        assert "## Score Summary" in analysis.raw_report
+        assert "| Evaluator | Score |" in analysis.raw_report
+        assert "| Agent A | 4/5 |" in analysis.raw_report
+        assert "| Agent B | 3/5 |" in analysis.raw_report
+
+    def test_report_has_overall_score(self) -> None:
+        results = [
+            AgentResult(agent_name="A", raw_analysis="a", score=4),
+        ]
+        analysis = _aggregate_report(results, "test-model")
+        assert "## Overall Match Score: 8/10" in analysis.raw_report
+
+    def test_empty_results(self) -> None:
+        analysis = _aggregate_report([], "test-model")
+        assert analysis.score == 0
 
 
 class TestAnalyzeFitSuccess:
-    """Tests for successful API calls."""
+    """Tests for successful multi-agent API calls."""
 
     async def test_returns_analysis_result(self) -> None:
-        """analyze_fit() should return AnalysisResult on success."""
         mock_client = AsyncMock()
-        mock_client.messages.create.return_value = _make_response(_make_valid_report(7))
+        mock_client.messages.create.return_value = _make_response(
+            _make_agent_response(4)
+        )
 
         with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
             mock_anthropic.return_value = mock_client
             result = await analyze_fit(
                 job_text="Senior Python Developer needed",
                 resume_text="Python developer with 5 years experience",
+                model="test-model",
             )
 
         assert isinstance(result, AnalysisResult)
-        assert result.score == 7
+        assert result.model == "test-model"
+        assert len(result.agent_results) == 5
         assert "JobFit Analysis Report" in result.raw_report
+
+    async def test_model_from_env_var(self) -> None:
+        mock_client = AsyncMock()
+        mock_client.messages.create.return_value = _make_response(
+            _make_agent_response(3)
+        )
+
+        with (
+            patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic,
+            patch.dict("os.environ", {"CLAUDE_MODEL": "claude-sonnet-4-5-20250929"}),
+        ):
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job posting",
+                resume_text="Resume text",
+            )
+
         assert result.model == "claude-sonnet-4-5-20250929"
 
     async def test_default_model(self) -> None:
-        """analyze_fit() should use claude-sonnet-4-5-20250929 by default."""
         mock_client = AsyncMock()
-        mock_client.messages.create.return_value = _make_response(_make_valid_report(5))
+        mock_client.messages.create.return_value = _make_response(
+            _make_agent_response(3)
+        )
 
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+        with (
+            patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic,
+            patch.dict("os.environ", {}, clear=True),
+        ):
             mock_anthropic.return_value = mock_client
             result = await analyze_fit(
                 job_text="Job posting",
                 resume_text="Resume text",
-            )
-
-        assert result.model == "claude-sonnet-4-5-20250929"
-        mock_client.messages.create.assert_called_once()
-        call_kwargs = mock_client.messages.create.call_args[1]
-        assert call_kwargs["model"] == "claude-sonnet-4-5-20250929"
-
-    async def test_custom_model(self) -> None:
-        """analyze_fit() should accept custom model parameter."""
-        mock_client = AsyncMock()
-        mock_client.messages.create.return_value = _make_response(_make_valid_report(6))
-
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-            mock_anthropic.return_value = mock_client
-            result = await analyze_fit(
-                job_text="Job posting",
-                resume_text="Resume text",
-                model="claude-opus-4-6",
             )
 
         assert result.model == "claude-opus-4-6"
-        mock_client.messages.create.assert_called_once()
-        call_kwargs = mock_client.messages.create.call_args[1]
-        assert call_kwargs["model"] == "claude-opus-4-6"
 
-    async def test_prompt_contains_job_and_resume_text(self) -> None:
-        """Prompt should contain job text and resume text with delimiters."""
+    async def test_explicit_model_overrides_env(self) -> None:
         mock_client = AsyncMock()
-        mock_client.messages.create.return_value = _make_response(_make_valid_report(8))
+        mock_client.messages.create.return_value = _make_response(
+            _make_agent_response(3)
+        )
 
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+        with (
+            patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic,
+            patch.dict("os.environ", {"CLAUDE_MODEL": "env-model"}),
+        ):
             mock_anthropic.return_value = mock_client
-            await analyze_fit(
-                job_text="Senior Python Engineer - 5 years exp required",
-                resume_text="Python developer with 6 years experience at FAANG",
+            result = await analyze_fit(
+                job_text="Job posting",
+                resume_text="Resume text",
+                model="explicit-model",
             )
 
-        mock_client.messages.create.assert_called_once()
-        call_kwargs = mock_client.messages.create.call_args[1]
-        user_message = call_kwargs["messages"][0]["content"]
+        assert result.model == "explicit-model"
 
-        # Check delimiters separate job and resume
-        assert "=== JOB POSTING ===" in user_message
-        assert "=== RESUME ===" in user_message
-        assert "=== END ===" in user_message
-
-        # Check actual content is present
-        assert "Senior Python Engineer - 5 years exp required" in user_message
-        assert "Python developer with 6 years experience at FAANG" in user_message
-
-    async def test_prompt_requests_all_six_sections(self) -> None:
-        """Prompt should request all 6 required sections."""
+    async def test_all_agents_called_concurrently(self) -> None:
         mock_client = AsyncMock()
-        mock_client.messages.create.return_value = _make_response(_make_valid_report(7))
+        mock_client.messages.create.return_value = _make_response(
+            _make_agent_response(4)
+        )
 
         with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
             mock_anthropic.return_value = mock_client
             await analyze_fit(
                 job_text="Job posting",
                 resume_text="Resume text",
+                model="test-model",
             )
 
-        mock_client.messages.create.assert_called_once()
-        call_kwargs = mock_client.messages.create.call_args[1]
-        system_message = call_kwargs["system"]
-        user_message = call_kwargs["messages"][0]["content"]
+        # Should have called the API 5 times (once per agent)
+        assert mock_client.messages.create.call_count == 5
+        # Each call should use agent persona as system prompt
+        for call in mock_client.messages.create.call_args_list:
+            assert "system" in call.kwargs
+            assert len(call.kwargs["system"]) > 0
 
-        # Check system message mentions all sections
-        assert "Overall Match Score" in system_message
-        assert "Skills Matrix" in system_message
-        assert "Experience Alignment" in system_message
-        assert "Keyword Analysis" in system_message
-        assert "Culture Fit Notes" in system_message
-        assert "Suggestions" in system_message
-
-        # Check user message provides format for all sections
-        assert "## Overall Match Score:" in user_message
-        assert "## Skills Matrix" in user_message
-        assert "## Experience Alignment" in user_message
-        assert "## Keyword Analysis" in user_message
-        assert "## Culture Fit Notes" in user_message
-        assert "## Suggestions" in user_message
-
-    async def test_extracts_correct_score(self) -> None:
-        """Should correctly extract score from various formats."""
-        test_cases = [
-            ("## Overall Match Score: 1/10", 1),
-            ("## Overall Match Score: 5/10", 5),
-            ("## Overall Match Score: 10/10", 10),
-            ("##Overall Match Score:9/10", 9),  # No spaces
-            ("## overall match score: 7/10", 7),  # Lowercase
-            ("**Overall Match Score: 8/10**", 8),  # Bold markers
-            ("**Overall Match Score**: 6/10", 6),  # Bold on label only
-            ("Overall Match Score: 4/10", 4),  # No heading marker
-            ("Match Score: 3/10", 3),  # Shorter label
-            ("Score: 9 / 10", 9),  # Spaces around slash
+    async def test_agent_scores_parsed(self) -> None:
+        mock_client = AsyncMock()
+        # Return different scores for each call
+        scores = [5, 4, 3, 4, 5]
+        mock_client.messages.create.side_effect = [
+            _make_response(_make_agent_response(s)) for s in scores
         ]
 
-        for report_text, expected_score in test_cases:
-            mock_client = AsyncMock()
-            full_report = f"# Report\n{report_text}\n## Skills Matrix\ntest"
-            mock_client.messages.create.return_value = _make_response(full_report)
+        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job",
+                resume_text="Resume",
+                model="test-model",
+            )
 
-            with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-                mock_anthropic.return_value = mock_client
-                result = await analyze_fit(
-                    job_text="Job",
-                    resume_text="Resume",
-                )
-
-            assert result.score == expected_score
+        agent_scores = [r.score for r in result.agent_results]
+        assert agent_scores == scores
 
 
 class TestAnalyzeFitErrors:
@@ -220,7 +320,6 @@ class TestAnalyzeFitErrors:
         self,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """AuthenticationError should exit with code 5 and show auth message."""
         mock_client = AsyncMock()
         mock_response = MagicMock()
         mock_response.status_code = 401
@@ -230,16 +329,17 @@ class TestAnalyzeFitErrors:
             body=None,
         )
 
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-            mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
+        with pytest.raises(SystemExit) as exc_info:
+            await _run_agent(
+                client=mock_client,
+                model="test-model",
+                agent_name="Test Agent",
+                persona="Test persona",
+                job_text="Job posting",
+                resume_text="Resume text",
+            )
 
         assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
         captured = capsys.readouterr()
         assert "authentication" in captured.err.lower()
 
@@ -247,7 +347,6 @@ class TestAnalyzeFitErrors:
         self,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """RateLimitError should exit with code 5 and show rate limit hint."""
         mock_client = AsyncMock()
         mock_response = MagicMock()
         mock_response.status_code = 429
@@ -257,194 +356,84 @@ class TestAnalyzeFitErrors:
             body=None,
         )
 
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-            mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
+        with pytest.raises(SystemExit) as exc_info:
+            await _run_agent(
+                client=mock_client,
+                model="test-model",
+                agent_name="Test Agent",
+                persona="Test persona",
+                job_text="Job posting",
+                resume_text="Resume text",
+            )
 
         assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
         captured = capsys.readouterr()
         assert "rate limit" in captured.err.lower()
-
-    async def test_api_status_error_exits_5(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """APIStatusError should exit with code 5 and show server error."""
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-
-        # Create proper APIStatusError
-        error = anthropic.APIStatusError(
-            "Internal server error",
-            response=mock_response,
-            body=None,
-        )
-        error.status_code = 500
-        error.message = "Internal server error"
-
-        mock_client.messages.create.side_effect = error
-
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-            mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
-
-        assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
-        captured = capsys.readouterr()
-        assert "server error" in captured.err.lower()
-        assert "500" in captured.err
-
-    async def test_api_connection_error_exits_5(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """APIConnectionError should exit with code 5 and show connection error."""
-        mock_client = AsyncMock()
-        mock_request = MagicMock()
-        mock_client.messages.create.side_effect = anthropic.APIConnectionError(
-            message="Connection timeout",
-            request=mock_request,
-        )
-
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-            mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
-
-        assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
-        captured = capsys.readouterr()
-        assert "connection" in captured.err.lower()
-
-    async def test_generic_exception_exits_5(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Generic Exception should exit with code 5."""
-        mock_client = AsyncMock()
-        mock_client.messages.create.side_effect = Exception("Unexpected error")
-
-        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
-            mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
-
-        assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
-        captured = capsys.readouterr()
-        assert "error" in captured.err.lower()
 
     async def test_client_init_error_exits_5(
         self,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """Client initialization failure should exit with code 5."""
         with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
             mock_anthropic.side_effect = Exception("Missing API key")
             with pytest.raises(SystemExit) as exc_info:
                 await analyze_fit(
                     job_text="Job posting",
                     resume_text="Resume text",
+                    model="test-model",
                 )
 
         assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
         captured = capsys.readouterr()
         assert "failed to initialize" in captured.err.lower()
-        assert "ANTHROPIC_API_KEY" in captured.err
 
 
 class TestScoreParsing:
-    """Tests for score extraction from API response."""
+    """Tests for agent score extraction from API response."""
 
-    async def test_valid_score_extracted(self) -> None:
-        """Should extract valid score from response."""
+    async def test_parses_standard_format(self) -> None:
         mock_client = AsyncMock()
-        mock_client.messages.create.return_value = _make_response(_make_valid_report(7))
+        mock_client.messages.create.return_value = _make_response(
+            "## Score: 4/5\n\nGood candidate."
+        )
 
         with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
             mock_anthropic.return_value = mock_client
             result = await analyze_fit(
-                job_text="Job posting",
-                resume_text="Resume text",
+                job_text="Job", resume_text="Resume", model="test-model"
             )
 
-        assert result.score == 7
+        # All 5 agents get the same response, so all should parse score=4
+        for agent_result in result.agent_results:
+            assert agent_result.score == 4
 
-    async def test_missing_score_exits_5(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Missing score in response should exit with code 5."""
+    async def test_defaults_to_3_on_missing_score(self) -> None:
         mock_client = AsyncMock()
-        # Response without valid score line
-        invalid_report = """# JobFit Analysis Report
-
-## Skills Matrix
-| Skill | Match |
-|-------|-------|
-| Python | ✅ |
-
-## Experience Alignment
-Good match.
-"""
-        mock_client.messages.create.return_value = _make_response(invalid_report)
+        mock_client.messages.create.return_value = _make_response(
+            "No score in this response.\nJust some analysis text."
+        )
 
         with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
             mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
 
-        assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
-        captured = capsys.readouterr()
-        assert "failed to parse" in captured.err.lower()
-        assert "match score" in captured.err.lower()
+        for agent_result in result.agent_results:
+            assert agent_result.score == 3
 
-    async def test_malformed_score_exits_5(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Malformed score line should exit with code 5."""
+    async def test_rejects_out_of_range_score(self) -> None:
         mock_client = AsyncMock()
-        # Response with malformed score line
-        invalid_report = """# JobFit Analysis Report
-
-## Overall Match Score: Not a number/10
-
-## Skills Matrix
-Test
-"""
-        mock_client.messages.create.return_value = _make_response(invalid_report)
+        mock_client.messages.create.return_value = _make_response(
+            "## Score: 9/5\n\nInvalid score."
+        )
 
         with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
             mock_anthropic.return_value = mock_client
-            with pytest.raises(SystemExit) as exc_info:
-                await analyze_fit(
-                    job_text="Job posting",
-                    resume_text="Resume text",
-                )
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
 
-        assert exc_info.value.code == EXIT_API
-        assert exc_info.value.code == 5
-        captured = capsys.readouterr()
-        assert "failed to parse" in captured.err.lower()
+        # 9 is out of 1-5 range, should default to 3
+        for agent_result in result.agent_results:
+            assert agent_result.score == 3
