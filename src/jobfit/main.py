@@ -46,8 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         "-r",
-        required=True,
-        help="Path to resume file (PDF, DOCX, or TXT)",
+        required=False,
+        default=None,
+        help="Path to resume file (PDF, DOCX, or TXT). "
+        "Defaults to RESUME_PATH env var.",
     )
     parser.add_argument(
         "--output",
@@ -101,6 +103,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.error = error_handler  # type: ignore[assignment]
 
     args = parser.parse_args(argv)
+
+    # Resolve --resume: CLI arg takes precedence over RESUME_PATH env var
+    if args.resume is None:
+        env_resume = os.environ.get("RESUME_PATH", "")
+        if env_resume.strip():
+            args.resume = env_resume
+        else:
+            print_error(
+                "no resume path provided",
+                hint=(
+                    "Pass --resume/-r or set the RESUME_PATH environment variable.\n"
+                    "  Example: jobfit --job posting.pdf --resume resume.pdf\n"
+                    "  Or:      export RESUME_PATH=/path/to/resume.pdf"
+                ),
+                exit_code=EXIT_USAGE,
+            )
 
     # Configure progress output and debug logging
     configure_progress(quiet=args.quiet, debug=args.verbose)
