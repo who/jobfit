@@ -106,8 +106,6 @@ from your specialized perspective.
 
 Provide your evaluation as follows:
 
-## Score: X/5
-
 ## Analysis
 [Your detailed evaluation from your specialized perspective, \
 referencing specific evidence from the resume]
@@ -119,7 +117,15 @@ referencing specific evidence from the resume]
 [Bullet points of concerns or red flags from your perspective]
 
 ## Verdict
-[One-paragraph final assessment]"""
+[One-paragraph final assessment]
+
+Finally, provide your structured score in a JSON code block:
+
+```json
+{{"score": X}}
+```
+
+Where X is your score from 1-5 (1=poor fit, 5=excellent fit)."""
 
 
 async def _run_agent(
@@ -206,27 +212,64 @@ async def _run_agent(
             response.usage.output_tokens,
         )
 
-    # Parse score from response (X/5 format)
+    # Parse score from response — prefer JSON block, fall back to regex
     score = 3  # default if parsing fails
-    score_patterns = [
-        r"##\s*Score:\s*(\d+)\s*/\s*5",
-        r"\*{0,2}Score\*{0,2}\s*:?\s*(\d+)\s*/\s*5",
-        r"score\s*:?\s*(\d+)\s*/\s*5",
-    ]
-    for pattern in score_patterns:
-        score_match = re.search(pattern, raw_analysis, re.IGNORECASE)
-        if score_match:
-            parsed = int(score_match.group(1))
-            if 1 <= parsed <= 5:
-                score = parsed
+    parsed = False
+
+    # Strategy 1: JSON code block  ```json{"score": X}```
+    json_block_match = re.search(
+        r"```json\s*\{[^}]*\"score\"\s*:\s*(\d+)[^}]*\}\s*```",
+        raw_analysis,
+        re.IGNORECASE,
+    )
+    if json_block_match:
+        val = int(json_block_match.group(1))
+        if 1 <= val <= 5:
+            score = val
+            parsed = True
+            logger.debug("Agent %s: parsed score=%d from JSON block", agent_name, score)
+
+    # Strategy 2: bare JSON object {"score": X} without code fences
+    if not parsed:
+        bare_json_match = re.search(
+            r"\{[^}]*\"score\"\s*:\s*(\d+)[^}]*\}",
+            raw_analysis,
+            re.IGNORECASE,
+        )
+        if bare_json_match:
+            val = int(bare_json_match.group(1))
+            if 1 <= val <= 5:
+                score = val
+                parsed = True
                 logger.debug(
-                    "Agent %s: parsed score=%d with pattern=%r",
+                    "Agent %s: parsed score=%d from bare JSON",
                     agent_name,
                     score,
-                    pattern,
                 )
-                break
-    else:
+
+    # Strategy 3: legacy regex fallback (## Score: X/5 variants)
+    if not parsed:
+        score_patterns = [
+            r"##\s*Score:\s*(\d+)\s*/\s*5",
+            r"\*{0,2}Score\*{0,2}\s*:?\s*(\d+)\s*/\s*5",
+            r"score\s*:?\s*(\d+)\s*/\s*5",
+        ]
+        for pattern in score_patterns:
+            score_match = re.search(pattern, raw_analysis, re.IGNORECASE)
+            if score_match:
+                val = int(score_match.group(1))
+                if 1 <= val <= 5:
+                    score = val
+                    parsed = True
+                    logger.debug(
+                        "Agent %s: parsed score=%d with regex pattern=%r",
+                        agent_name,
+                        score,
+                        pattern,
+                    )
+                    break
+
+    if not parsed:
         logger.debug(
             "Agent %s: could not parse score, using default=%d",
             agent_name,

@@ -34,9 +34,7 @@ def _make_response(text: str) -> MagicMock:
 
 def _make_agent_response(score: int = 4) -> str:
     """Create a valid agent analysis response."""
-    return f"""## Score: {score}/5
-
-## Analysis
+    return f"""## Analysis
 Strong technical background with relevant experience.
 
 ## Key Strengths
@@ -47,7 +45,11 @@ Strong technical background with relevant experience.
 - Limited cloud experience
 
 ## Verdict
-A strong candidate overall."""
+A strong candidate overall.
+
+```json
+{{"score": {score}}}
+```"""
 
 
 class TestAgentResult:
@@ -127,7 +129,7 @@ class TestBuildUserMessage:
 
     def test_requests_score_format(self) -> None:
         msg = _build_user_message("job", "resume")
-        assert "## Score: X/5" in msg
+        assert '{"score": X}' in msg
 
 
 class TestAggregateReport:
@@ -437,3 +439,65 @@ class TestScoreParsing:
         # 9 is out of 1-5 range, should default to 3
         for agent_result in result.agent_results:
             assert agent_result.score == 3
+
+    async def test_parses_json_block_format(self) -> None:
+        mock_client = AsyncMock()
+        mock_client.messages.create.return_value = _make_response(
+            '## Analysis\nGreat fit.\n\n```json\n{"score": 5}\n```'
+        )
+
+        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
+
+        for agent_result in result.agent_results:
+            assert agent_result.score == 5
+
+    async def test_parses_bare_json_format(self) -> None:
+        mock_client = AsyncMock()
+        mock_client.messages.create.return_value = _make_response(
+            '## Analysis\nDecent candidate.\n\n{"score": 2}'
+        )
+
+        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
+
+        for agent_result in result.agent_results:
+            assert agent_result.score == 2
+
+    async def test_json_score_preferred_over_regex(self) -> None:
+        """JSON block score should take priority over markdown score."""
+        mock_client = AsyncMock()
+        mock_client.messages.create.return_value = _make_response(
+            '## Score: 2/5\n\nAnalysis here.\n\n```json\n{"score": 4}\n```'
+        )
+
+        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
+
+        for agent_result in result.agent_results:
+            assert agent_result.score == 4
+
+    async def test_legacy_regex_still_works(self) -> None:
+        """Old ## Score: X/5 format should still parse as fallback."""
+        mock_client = AsyncMock()
+        mock_client.messages.create.return_value = _make_response(
+            "## Score: 4/5\n\nGood candidate with strong skills."
+        )
+
+        with patch("jobfit.analyze.anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_anthropic.return_value = mock_client
+            result = await analyze_fit(
+                job_text="Job", resume_text="Resume", model="test-model"
+            )
+
+        for agent_result in result.agent_results:
+            assert agent_result.score == 4
