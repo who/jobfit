@@ -21,7 +21,7 @@ from jobfit.errors import (
     format_error,
     print_error,
 )
-from jobfit.parse_pdf import parse_pdf
+from jobfit.parse_job import parse_job
 from jobfit.parse_resume import parse_resume
 from jobfit.progress import configure as configure_progress
 from jobfit.progress import log_progress
@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--job",
         "-j",
         required=True,
-        help="Path to job posting PDF file",
+        help="Path to job posting file (PDF, TXT, or MD)",
     )
     parser.add_argument(
         "--resume",
@@ -149,9 +149,9 @@ def main(argv: list[str] | None = None) -> None:
             exit_code=EXIT_INPUT,
         )
 
-    # Parse job posting PDF (synchronous)
+    # Parse job posting (synchronous)
     log_progress(f"Reading job posting from {args.job}...")
-    job_text = parse_pdf(job_path)
+    job_text = parse_job(job_path)
     job_word_count = len(job_text.split())
     log_progress(f"Parsed job posting ({job_word_count} words)")
     logger.debug(

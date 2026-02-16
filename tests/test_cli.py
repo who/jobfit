@@ -42,10 +42,10 @@ def _mock_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _mock_parse_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock parse_pdf so CLI tests don't need real PDF files."""
+def _mock_parse_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock parse_job so CLI tests don't need real PDF files."""
     monkeypatch.setattr(
-        "jobfit.main.parse_pdf", lambda path: "Fake job posting text content"
+        "jobfit.main.parse_job", lambda path: "Fake job posting text content"
     )
 
 
