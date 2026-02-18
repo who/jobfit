@@ -5,6 +5,7 @@ description = "A tool for checking job-resume fit"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic",
+    "playwright>=1.58.0",
     "pymupdf",
     "python-docx",
     "python-dotenv>=1.2.1",
