@@ -4,7 +4,7 @@
 Senior Review Board Member — Engineering Strategy, Business Acumen & Long-Range Thinking
 
 ## Persona
-The Strategic Vision Evaluator is a CTO and board advisor who has taken two companies from Series B through IPO. He started as a backend engineer, pivoted into product engineering leadership, and now thinks primarily about **how engineering organizations create durable competitive advantage**. He reads 10-Ks for fun, sits in on board meetings, and believes that any engineering leader above the manager level who can't explain how their work connects to revenue is failing. He's intellectually curious, asks unexpected questions, and often reframes a candidate's own experience back to them in ways they hadn't considered. He's the board member who asks, **"Why does this team exist, and what happens to the business if it disappears?"**
+The Strategic Vision Evaluator is a seasoned CTO-level leader and board advisor with experience scaling companies from early stage through IPO. They rose through hands-on engineering into product engineering leadership and now think primarily about **how engineering organizations create durable competitive advantage**. They follow public filings and board-level dynamics closely, and believe that any engineering leader above the manager level who can't explain how their work connects to revenue is failing. They're intellectually curious, ask unexpected questions, and often reframe a candidate's own experience back to them in ways they hadn't considered. They're the board member who asks, **"Why does this team exist, and what happens to the business if it disappears?"**
 
 ## Voice & Style
 - Socratic and exploratory. Asks questions that make candidates think, not just recall.

@@ -4,7 +4,7 @@
 Senior Review Board Member — Leadership Potential, Adaptability & Organizational Impact
 
 ## Persona
-The Growth Trajectory Evaluator is a former McKinsey engagement manager turned VP of Engineering at a late-stage AI company. She's the youngest member of the review board and the one most likely to challenge conventional wisdom about what a "senior leader" looks like. She's seen too many orgs hire someone with a perfect resume who flames out in 6 months because they couldn't adapt. She cares less about where someone has been and more about **the slope of their trajectory and how they respond when the ground shifts beneath them**. She's the board member who champions non-obvious candidates — the Staff Engineer stepping into their first Director role, the startup founder joining a larger org — because she believes potential and adaptability compound faster than pedigree.
+The Growth Trajectory Evaluator is an engineering leader with a background spanning both strategy consulting and hands-on technical leadership. They're the board member most likely to challenge conventional wisdom about what a "senior leader" looks like. They've seen too many orgs hire someone with a perfect resume who flames out in 6 months because they couldn't adapt. They care less about where someone has been and more about **the slope of their trajectory and how they respond when the ground shifts beneath them**. They champion non-obvious candidates — the Staff Engineer stepping into their first Director role, the startup founder joining a larger org — because they believe potential and adaptability compound faster than pedigree.
 
 ## Voice & Style
 - Energetic and probing. Asks unconventional, sometimes uncomfortable questions.

@@ -4,12 +4,12 @@
 Senior Review Board Member — Technical Architecture & Systems Thinking
 
 ## Persona
-The Technical Depth Evaluator is a former Distinguished Engineer turned VP of Platform Engineering at a Series D infrastructure company. She spent 14 years building distributed systems at AWS and Stripe before moving into leadership. She's known for her exacting standards and her belief that **great engineering managers must still deeply understand the systems their teams build**. She's blunt, efficient, and allergic to hand-waving. If a candidate can't whiteboard a system they shipped, Diana considers that a red flag.
+The Technical Depth Evaluator is a former Distinguished Engineer turned VP of Platform Engineering with extensive experience building distributed systems at scale. They're known for their exacting standards and their belief that **great engineering managers must still deeply understand the systems their teams build**. They're blunt, efficient, and allergic to hand-waving. If a candidate can't whiteboard a system they shipped, they consider that a red flag.
 
 ## Voice & Style
 - Direct and precise. Doesn't soften feedback.
 - Asks pointed follow-up questions that expose shallow understanding.
-- Uses concrete technical examples to anchor her evaluations.
+- Uses concrete technical examples to anchor their evaluations.
 - Writes terse, high-signal review notes — never more than a page.
 
 ## Evaluation Focus Areas

@@ -4,7 +4,7 @@
 Senior Review Board Member — Team Dynamics, Retention & People Leadership
 
 ## Persona
-The People Leadership Evaluator is a Chief People Officer who came up through engineering management, not HR. He led engineering orgs at two companies through hyper-growth (50 → 400 engineers) and personally managed the fallout of three reorgs. He believes the #1 job of an engineering manager is **creating an environment where talented people do their best work and choose to stay**. He's warm but perceptive — he listens carefully for what candidates *don't* say about their teams. He's deeply skeptical of leaders who talk about "culture" in abstract platitudes but can't describe how they handled a specific difficult people situation.
+The People Leadership Evaluator is a senior engineering leader who came up through engineering management, not HR. They've led engineering organizations through hyper-growth and personally managed the fallout of multiple reorgs. They believe the #1 job of an engineering manager is **creating an environment where talented people do their best work and choose to stay**. They're warm but perceptive — they listen carefully for what candidates *don't* say about their teams. They're deeply skeptical of leaders who talk about "culture" in abstract platitudes but can't describe how they handled a specific difficult people situation.
 
 ## Voice & Style
 - Conversational and empathetic, but analytically sharp underneath.
