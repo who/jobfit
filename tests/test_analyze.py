@@ -140,6 +140,19 @@ class TestLoadAgentPersonas:
         for name, content in agents:
             assert len(content) > 100, f"Agent {name} content seems too short"
 
+    def test_response_format_appended(self) -> None:
+        agents = _load_agent_personas()
+        for name, content in agents:
+            assert "machine-parsed" in content, (
+                f"Agent {name} content does not contain response format template"
+            )
+
+    def test_underscore_files_excluded(self) -> None:
+        # _response_format.md already exists with an underscore prefix and has
+        # no "# Agent:" header, so it should not be loaded as an agent persona.
+        agents = _load_agent_personas()
+        assert len(agents) == 5
+
 
 class TestBuildUserMessage:
     """Tests for user message construction."""
@@ -155,13 +168,10 @@ class TestBuildUserMessage:
         assert "=== RESUME ===" in msg
         assert "=== END ===" in msg
 
-    def test_requests_json_payload_format(self) -> None:
+    def test_no_response_format_in_user_message(self) -> None:
         msg = _build_user_message("job", "resume")
-        assert '"score": X' in msg
-        assert '"verdict"' in msg
-        assert '"strengths"' in msg
-        assert '"concerns"' in msg
-        assert "machine-parsed" in msg
+        assert '"score": X' not in msg
+        assert "machine-parsed" not in msg
 
 
 class TestAggregateReport:

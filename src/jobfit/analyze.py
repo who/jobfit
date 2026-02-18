@@ -44,6 +44,10 @@ class AnalysisResult(BaseModel):
 def _load_agent_personas() -> list[tuple[str, str]]:
     """Load all agent persona .md files from the agents directory.
 
+    Discovers any .md file in the agents directory. Files with underscore
+    prefix (e.g. _response_format.md) are excluded from discovery.
+    The shared response format template is appended to each agent's persona.
+
     Returns:
         List of (agent_name, persona_content) tuples.
 
@@ -57,20 +61,33 @@ def _load_agent_personas() -> list[tuple[str, str]]:
             exit_code=EXIT_API,
         )
 
+    # Load shared response format template
+    response_format_path = AGENTS_DIR / "_response_format.md"
+    response_format = ""
+    if response_format_path.is_file():
+        response_format = response_format_path.read_text(encoding="utf-8")
+
     agents = []
-    for md_file in sorted(AGENTS_DIR.glob("agent_*.md")):
+    for md_file in sorted(AGENTS_DIR.glob("*.md")):
+        if md_file.name.startswith("_"):
+            continue
         content = md_file.read_text(encoding="utf-8")
         # Extract agent name from the first line (e.g., "# Agent: Diana Chen — ...")
         first_line = content.split("\n", 1)[0]
         match = re.match(r"#\s*Agent:\s*(.+?)(?:\s*—|\s*-|\s*$)", first_line)
-        name = match.group(1).strip() if match else md_file.stem
+        if not match:
+            logger.warning("Skipping %s: no valid '# Agent:' header", md_file.name)
+            continue
+        name = match.group(1).strip()
+        if response_format:
+            content = content + "\n\n" + response_format
         agents.append((name, content))
         logger.debug("Loaded agent persona: %s from %s", name, md_file.name)
 
     if not agents:
         print_error(
             "no agent persona files found",
-            hint=f"Add agent_*.md files to {AGENTS_DIR}",
+            hint=f"Add .md files with '# Agent:' headers to {AGENTS_DIR}",
             exit_code=EXIT_API,
         )
 
@@ -106,35 +123,7 @@ from your specialized perspective.
 === RESUME ===
 {resume_text}
 
-=== END ===
-
-Provide your evaluation as follows:
-
-## Analysis
-[Your detailed evaluation from your specialized perspective, \
-referencing specific evidence from the resume]
-
-## Key Strengths
-[Bullet points of strengths relevant to your evaluation focus]
-
-## Concerns
-[Bullet points of concerns or red flags from your perspective]
-
-## Verdict
-[One-paragraph final assessment]
-
-Finally, provide your structured payload in a JSON code block:
-
-```json
-{{
-  "score": X,
-  "verdict": "your one-paragraph verdict",
-  "strengths": ["strength1", "strength2"],
-  "concerns": ["concern1", "concern2"]
-}}
-```
-
-Where score is 1-5 (1=poor fit, 5=excellent fit). This block is machine-parsed."""
+=== END ==="""
 
 
 async def _run_agent(
