@@ -13,8 +13,10 @@ from jobfit.main import main, write_output
 
 @pytest.fixture(autouse=True)
 def _set_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set a dummy API key so arg-parsing tests don't fail on key validation."""
+    """Set a dummy API key and isolate from real .env file."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
+    monkeypatch.delenv("RESUME_PATH", raising=False)
+    monkeypatch.setattr("jobfit.main.load_dotenv", lambda: None)
 
 
 @pytest.fixture()
