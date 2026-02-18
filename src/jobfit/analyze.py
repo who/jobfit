@@ -44,9 +44,14 @@ class AnalysisResult(BaseModel):
 def _load_agent_personas() -> list[tuple[str, str]]:
     """Load all agent persona .md files from the agents directory.
 
-    Discovers any .md file in the agents directory. Files with underscore
-    prefix (e.g. _response_format.md) are excluded from discovery.
-    The shared response format template is appended to each agent's persona.
+    Discovers any .md file with an ``# Agent: <Name>`` header in the agents
+    directory.  Drop a new ``.md`` file into ``src/jobfit/agents/`` following
+    this convention and it will be auto-discovered at runtime.
+
+    Files with an underscore prefix (e.g. ``_response_format.md``) are
+    excluded from discovery.  The shared response format template from
+    ``_response_format.md`` is appended to each agent's persona **only if**
+    the agent file does not already contain a ``## Response Format`` section.
 
     Returns:
         List of (agent_name, persona_content) tuples.
@@ -72,7 +77,7 @@ def _load_agent_personas() -> list[tuple[str, str]]:
         if md_file.name.startswith("_"):
             continue
         content = md_file.read_text(encoding="utf-8")
-        # Extract agent name from the first line (e.g., "# Agent: Diana Chen — ...")
+        # Extract agent name from the first line (e.g., "# Agent: Technical Depth ...")
         first_line = content.split("\n", 1)[0]
         match = re.match(r"#\s*Agent:\s*(.+?)(?:\s*—|\s*-|\s*$)", first_line)
         if not match:
@@ -80,7 +85,22 @@ def _load_agent_personas() -> list[tuple[str, str]]:
             continue
         name = match.group(1).strip()
         if response_format:
-            content = content + "\n\n" + response_format
+            pat = r"^##\s+Response\s+Format"
+            flags = re.IGNORECASE | re.MULTILINE
+            has_response_format = bool(re.search(pat, content, flags))
+            if has_response_format:
+                logger.info(
+                    "Agent %s (%s): response format present, skipping injection",
+                    name,
+                    md_file.name,
+                )
+            else:
+                content = content + "\n\n" + response_format
+                logger.info(
+                    "Agent %s (%s): injected shared response format",
+                    name,
+                    md_file.name,
+                )
         agents.append((name, content))
         logger.debug("Loaded agent persona: %s from %s", name, md_file.name)
 

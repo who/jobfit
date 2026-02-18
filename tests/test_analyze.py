@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import anthropic
@@ -152,6 +153,74 @@ class TestLoadAgentPersonas:
         # no "# Agent:" header, so it should not be loaded as an agent persona.
         agents = _load_agent_personas()
         assert len(agents) == 5
+
+
+class TestResponseFormatInjection:
+    """Tests for conditional response format injection."""
+
+    _SHARED_FMT = "## Response Format\n\nmachine-parsed"
+
+    def _setup_agents_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> Path:
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "_response_format.md").write_text(self._SHARED_FMT)
+        monkeypatch.setattr("jobfit.analyze.AGENTS_DIR", agents_dir)
+        return agents_dir
+
+    def test_injected_when_missing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agent without response format gets it injected."""
+        agents_dir = self._setup_agents_dir(tmp_path, monkeypatch)
+        (agents_dir / "agent_test.md").write_text(
+            "# Agent: Test Agent\n\nSome content here."
+        )
+
+        agents = _load_agent_personas()
+        assert len(agents) == 1
+        name, content = agents[0]
+        assert name == "Test Agent"
+        assert "machine-parsed" in content
+
+    def test_not_duplicated_when_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agent with response format keeps its own."""
+        agents_dir = self._setup_agents_dir(tmp_path, monkeypatch)
+        agent_content = (
+            "# Agent: Custom Agent\n\nContent."
+            "\n\n## Response Format\n\nCustom format here."
+        )
+        (agents_dir / "agent_custom.md").write_text(agent_content)
+
+        agents = _load_agent_personas()
+        assert len(agents) == 1
+        name, content = agents[0]
+        assert name == "Custom Agent"
+        assert "Custom format here." in content
+        assert "machine-parsed" not in content
+
+    def test_no_agent_header_still_skipped(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """File without '# Agent:' header is skipped."""
+        agents_dir = self._setup_agents_dir(tmp_path, monkeypatch)
+        (agents_dir / "bad_agent.md").write_text("# Not an agent header\n\nContent.")
+        (agents_dir / "agent_good.md").write_text("# Agent: Good Agent\n\nContent.")
+
+        agents = _load_agent_personas()
+        assert len(agents) == 1
+        assert agents[0][0] == "Good Agent"
 
 
 class TestBuildUserMessage:
