@@ -62,11 +62,11 @@ class TestAgentResult:
 
     def test_valid_construction(self) -> None:
         result = AgentResult(
-            agent_name="Diana Chen",
+            agent_name="Technical Depth Evaluator",
             raw_analysis="test analysis",
             score=4,
         )
-        assert result.agent_name == "Diana Chen"
+        assert result.agent_name == "Technical Depth Evaluator"
         assert result.score == 4
 
     def test_optional_fields_defaults(self) -> None:
@@ -129,11 +129,11 @@ class TestLoadAgentPersonas:
     def test_agent_names_extracted(self) -> None:
         agents = _load_agent_personas()
         names = [name for name, _ in agents]
-        assert "Diana Chen" in names
-        assert "Marcus Webb" in names
-        assert "James Okafor" in names
-        assert "Priya Ramaswamy" in names
-        assert "Sofia Engström" in names
+        assert "Technical Depth Evaluator" in names
+        assert "People Leadership Evaluator" in names
+        assert "Strategic Vision Evaluator" in names
+        assert "Execution & Delivery Evaluator" in names
+        assert "Growth Trajectory Evaluator" in names
 
     def test_agent_content_not_empty(self) -> None:
         agents = _load_agent_personas()
@@ -193,16 +193,20 @@ class TestAggregateReport:
 
     def test_report_contains_agent_sections(self) -> None:
         results = [
-            AgentResult(agent_name="Diana Chen", raw_analysis="tech analysis", score=4),
             AgentResult(
-                agent_name="Marcus Webb",
+                agent_name="Technical Depth Evaluator",
+                raw_analysis="tech analysis",
+                score=4,
+            ),
+            AgentResult(
+                agent_name="People Leadership Evaluator",
                 raw_analysis="people analysis",
                 score=3,
             ),
         ]
         analysis = _aggregate_report(results, "test-model")
-        assert "Diana Chen" in analysis.raw_report
-        assert "Marcus Webb" in analysis.raw_report
+        assert "Technical Depth Evaluator" in analysis.raw_report
+        assert "People Leadership Evaluator" in analysis.raw_report
         assert "tech analysis" in analysis.raw_report
         assert "people analysis" in analysis.raw_report
 

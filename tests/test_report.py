@@ -22,12 +22,12 @@ def _make_analysis_result(
     if agent_results is None:
         agent_results = [
             AgentResult(
-                agent_name="Diana Chen",
+                agent_name="Technical Depth Evaluator",
                 raw_analysis="Technical analysis with depth.",
                 score=4,
             ),
             AgentResult(
-                agent_name="Marcus Webb",
+                agent_name="People Leadership Evaluator",
                 raw_analysis="People and org health analysis.",
                 score=3,
             ),
@@ -84,8 +84,8 @@ class TestFormatReport:
     def test_report_contains_agent_sections(self) -> None:
         analysis = _make_analysis_result(score=7)
         report = format_report(analysis)
-        assert "Diana Chen" in report
-        assert "Marcus Webb" in report
+        assert "Technical Depth Evaluator" in report
+        assert "People Leadership Evaluator" in report
 
     def test_report_has_score_summary(self) -> None:
         analysis = _make_analysis_result(score=7)
