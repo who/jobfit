@@ -55,7 +55,9 @@ pass "Python $python_version meets minimum (>=3.11)"
 # 4. ANTHROPIC_API_KEY
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   fail "ANTHROPIC_API_KEY environment variable is not set"
-  info "Set it with: ${BOLD}export ANTHROPIC_API_KEY='sk-ant-...'${RESET}"
+  info "Option 1: ${BOLD}export ANTHROPIC_API_KEY='sk-ant-...'${RESET}"
+  info "Option 2: Add it to a ${BOLD}.env${RESET} file in the project root:"
+  info "  ${BOLD}echo \"ANTHROPIC_API_KEY=sk-ant-...\" >> .env${RESET}"
   exit 1
 fi
 pass "ANTHROPIC_API_KEY is set"
