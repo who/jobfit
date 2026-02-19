@@ -53,6 +53,12 @@ fi
 pass "Python $python_version meets minimum (>=3.11)"
 
 # 4. ANTHROPIC_API_KEY
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]] && [[ -f "$SCRIPT_DIR/.env" ]]; then
+  set -a
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   fail "ANTHROPIC_API_KEY environment variable is not set"
   info "Option 1: ${BOLD}export ANTHROPIC_API_KEY='sk-ant-...'${RESET}"
@@ -63,7 +69,6 @@ fi
 pass "ANTHROPIC_API_KEY is set"
 
 # 5. Dependencies installed (.venv exists)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ ! -d "$SCRIPT_DIR/.venv" ]]; then
   fail "Dependencies not installed (.venv not found)"
   info "Run: ${BOLD}uv sync${RESET}"
